@@ -109,6 +109,10 @@ pub struct UsageSnapshot {
     pub display_name: String,
     pub account_label: Option<String>,
     pub plan: Option<String>,
+    /// Whether the account has an active subscription/entitlement. `None` means
+    /// unknown or not subscription-based (for example API-billed accounts);
+    /// `Some(false)` marks an unsubscribed account whose card should be hidden.
+    pub has_subscription: Option<bool>,
     pub capabilities: ProviderCapabilities,
     pub auth_state: AuthState,
     pub data_kind: DataKind,
@@ -208,6 +212,7 @@ mod tests {
             plan: None,
             capabilities: ProviderCapabilities::default(),
             auth_state: AuthState::Unsupported,
+            has_subscription: None,
             data_kind: DataKind::Mock,
             windows: vec![],
             credits: None,

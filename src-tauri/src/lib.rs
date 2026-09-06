@@ -42,6 +42,7 @@ pub fn run() -> Result<(), AppError> {
                 provider_registry: {
                     let mut registry = providers::ProviderRegistry::default();
                     registry.register(Arc::new(providers::OpenAiProvider));
+                    registry.register(Arc::new(providers::AnthropicProvider));
                     registry.register(Arc::new(providers::MockProvider));
                     registry
                 },

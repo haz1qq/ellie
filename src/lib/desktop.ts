@@ -42,6 +42,8 @@ export interface UsageSnapshot {
   displayName: string;
   accountLabel: string | null;
   plan: string | null;
+  /** null = unknown or not subscription-based; false = explicitly unsubscribed (hidden) */
+  hasSubscription: boolean | null;
   capabilities: ProviderCapabilities;
   authState: string;
   dataKind: DataKind;

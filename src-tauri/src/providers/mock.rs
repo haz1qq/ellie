@@ -43,6 +43,7 @@ impl UsageProvider for MockProvider {
             display_name: self.display_name().into(),
             account_label: Some("Illustrative account".into()),
             plan: Some("Demo".into()),
+            has_subscription: None,
             capabilities: self.capabilities(),
             auth_state: AuthState::Unsupported,
             data_kind: DataKind::Mock,

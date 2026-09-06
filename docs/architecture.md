@@ -9,7 +9,7 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/commands.rs` | Typed IPC and serialized preference writes |
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
 | `src-tauri/src/history.rs` | Snapshot persistence, retrieval, and 90-day retention |
-| `src-tauri/src/providers/` | Provider abstraction, registry, models, and adapters (mock, OpenAI/Codex) |
+| `src-tauri/src/providers/` | Provider abstraction, registry, models, and adapters (mock, OpenAI/Codex, Anthropic/Claude) |
 | `src-tauri/src/settings.rs` | Non-sensitive, strictly typed preferences |
 | `src-tauri/src/error.rs` | Redacted errors |
 | `src/App.tsx` | Dashboard and settings views |
@@ -23,6 +23,6 @@ Tray navigation sets the intended view in native state and emits a window-scoped
 
 ## Dependencies
 
-Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides an async mutex and timers, serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests. HTTP, keyring, Axum, and analytics dependencies are deferred until used.
+Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides an async mutex and timers, serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the Anthropic Admin API calls. Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests. Keyring, Axum, and analytics dependencies are deferred until used.
 
-The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter and a live OpenAI / Codex adapter. The OpenAI/Codex provider reuses the codex CLI's own `codex app-server` (stdio JSON-RPC) to read ChatGPT plan quota; authentication is the user's `codex login`, and Ellie never handles tokens. No other real provider integrations exist, and other initial provider labels describe the roadmap only, not runtime capabilities. No invented quota windows, balances, estimates, or reset times are displayed as account data.
+The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter plus live adapters for OpenAI / Codex (codex app-server over stdio) and Anthropic / Claude (documented Admin API usage and cost). Authentication is reused (`codex login`) or env-key-based (`ANTHROPIC_API_KEY`); Ellie never stores tokens or logs secrets. Snapshots carry an explicit subscription flag so unsubscribed providers hide and reappear on resubscription. No other real provider integrations exist, and other initial provider labels describe the roadmap only, not runtime capabilities. No invented quota windows, balances, estimates, or reset times are displayed as account data.

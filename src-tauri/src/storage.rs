@@ -4,12 +4,13 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
-/// One migration per entry, in order. Index 0 is migration 0001, index 1 is 0002.
+/// One migration per entry, in order. Index 0 is migration 0001, index 2 is 0003.
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_settings.sql"),
     include_str!("../migrations/0002_history.sql"),
+    include_str!("../migrations/0003_subscription.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -143,7 +144,7 @@ mod tests {
         let connection = connect(&path)?;
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            2
+            3
         );
         assert_eq!(
             connection.query_row("SELECT COUNT(*) FROM usage_snapshots", [], |row| row
@@ -163,6 +164,36 @@ mod tests {
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
             99
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migrating_from_schema_2_adds_subscription_column() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        // Simulate a milestone 3 database: settings + history at schema 2.
+        let connection = connect(&path)?;
+        connection.execute_batch(include_str!("../migrations/0001_settings.sql"))?;
+        connection.execute_batch(include_str!("../migrations/0002_history.sql"))?;
+        connection.pragma_update(None, "user_version", 2)?;
+        drop(connection);
+
+        initialize(&path)?;
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            3
+        );
+        assert!(
+            connection.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('usage_snapshots') \
+                 WHERE name = 'has_subscription'",
+                [],
+                |row| row.get::<_, i64>(0).map(|count| count > 0),
+            )?,
+            "has_subscription column exists after migration"
         );
         Ok(())
     }

@@ -320,6 +320,11 @@ fn snapshot_from_response(
         display_name: DISPLAY_NAME.to_string(),
         account_label: response.account_id,
         plan: response.rate_limits.plan_type.clone(),
+        has_subscription: match response.rate_limits.plan_type.as_deref() {
+            Some("free") => Some(false),
+            Some(_) => Some(true),
+            None => None,
+        },
         capabilities: ProviderCapabilities {
             quota_windows: true,
             token_usage: false,
