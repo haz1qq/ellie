@@ -349,7 +349,7 @@ function ProviderCredentials() {
         : "Not set";
 
   return (
-    <fieldset disabled={busy}>
+    <fieldset disabled={busy} className="credentials">
       <legend>Provider credentials</legend>
       <p className="credential-intro">
         Keys are stored in Windows Credential Manager and never shown again.
