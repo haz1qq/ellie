@@ -1,13 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local main window may read and save non-sensitive preferences and hide to tray.",
+  "description": "Local main window may manage preferences, hide to tray, save/remove provider keys, and read credential source status; stored secrets are never returned.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-get-bootstrap",
     "allow-save-settings",
-    "allow-hide-to-tray"
+    "allow-hide-to-tray",
+    "allow-save-provider-key",
+    "allow-delete-provider-key",
+    "allow-provider-key-status"
   ]
 }
