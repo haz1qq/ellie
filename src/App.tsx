@@ -20,7 +20,10 @@ export default function App() {
   const [retry, setRetry] = useState(0);
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
   const visibleProviders = providers.filter(
-    (provider) => provider.snapshot?.hasSubscription !== false,
+    (provider) =>
+      provider.snapshot
+        ? provider.snapshot.hasSubscription !== false
+        : provider.error !== "authentication_required",
   );
   const native = desktop.available();
 
@@ -333,7 +336,7 @@ function providersCount(
   if (providers.length === 0) return "0 connected";
   const hidden = providers.length - visible.length;
   return hidden > 0
-    ? `${visible.length} shown · ${hidden} unsubscribed`
+    ? `${visible.length} shown · ${hidden} hidden`
     : `${visible.length} shown`;
 }
 
@@ -345,7 +348,7 @@ function usageDescription(
     return "Provider connections are not available in this build.";
   }
   if (visible.length === 0) {
-    return "No subscribed providers right now; they return automatically when resubscribed.";
+    return "Nothing active right now — hidden providers return when you subscribe or configure them.";
   }
   return hasLiveData(visible)
     ? "Cards show live quota from your configured logins; demo cards stay labeled."
@@ -357,7 +360,7 @@ function usageNote(providers: ProviderOverview[], visible: ProviderOverview[]) {
     return "No provider requests.";
   }
   if (visible.length === 0) {
-    return "Unsubscribed providers are hidden; resubscribe to bring them back.";
+    return "Inactive providers are hidden until you subscribe or configure them.";
   }
   return hasLiveData(visible)
     ? "Live data comes from your codex CLI login on this machine; no token is stored."
