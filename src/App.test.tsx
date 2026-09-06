@@ -30,6 +30,7 @@ const demoProviders: ProviderOverview[] = [
         localHistory: false,
       },
       authState: "unsupported",
+      hasSubscription: null,
       dataKind: "mock",
       windows: [
         {
@@ -69,6 +70,7 @@ const liveProviders: ProviderOverview[] = [
         localHistory: false,
       },
       authState: "authenticated",
+      hasSubscription: true,
       dataKind: "live",
       windows: [
         {
@@ -196,6 +198,76 @@ describe("bootstrap shell", () => {
     expect(
       screen.queryByText("There you are. I saved your spot."),
     ).not.toBeInTheDocument();
+  });
+
+  it("hides explicitly unsubscribed providers and brings them back on resubscribe", async () => {
+    const unsubscribed: ProviderOverview[] = [
+      {
+        snapshot: {
+          providerId: "openai-codex",
+          displayName: "OpenAI / Codex",
+          accountLabel: null,
+          plan: "free",
+          capabilities: {
+            quotaWindows: true,
+            tokenUsage: false,
+            accountBalance: false,
+            credits: false,
+            costTracking: false,
+            localHistory: false,
+          },
+          authState: "authenticated",
+          hasSubscription: false,
+          dataKind: "live",
+          windows: [
+            {
+              id: "primary",
+              label: "5-hour limit",
+              usedPercent: 5,
+              remainingPercent: 95,
+              resetAt: null,
+              source: "provider_reported",
+            },
+          ],
+          tokenUsage: null,
+          fetchedAt: "2026-09-06T14:00:00Z",
+        },
+        error: null,
+      },
+      ...demoProviders,
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: unsubscribed,
+    });
+    const first = render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    // The unsubscribed card is hidden; the demo card stays.
+    expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
+    expect(screen.getByText("Ellie Demo")).toBeVisible();
+    expect(screen.getByText("1 shown · 1 unsubscribed")).toBeVisible();
+    expect(screen.getByText(/Demo providers exercise Ellie's display/)).toBeVisible();
+
+    // Resubscribing flips the flag on the next refresh and the card returns.
+    const resubscribed: ProviderOverview[] = unsubscribed.map((provider) =>
+      provider.snapshot
+        ? {
+            ...provider,
+            snapshot: { ...provider.snapshot, plan: "plus", hasSubscription: true },
+          }
+        : provider,
+    );
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: resubscribed,
+    });
+    first.unmount();
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("OpenAI / Codex")).toBeVisible());
   });
 
   it("offers retry when settings cannot be loaded", async () => {

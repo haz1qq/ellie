@@ -19,6 +19,9 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [retry, setRetry] = useState(0);
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
+  const visibleProviders = providers.filter(
+    (provider) => provider.snapshot?.hasSubscription !== false,
+  );
   const native = desktop.available();
 
   useEffect(() => {
@@ -175,10 +178,12 @@ export default function App() {
               </span>
               <div>
                 <h2 id="usage-title">
-                  {providers.length === 0 ? "No usage data yet" : "Current usage"}
+                  {visibleProviders.length === 0
+                    ? "No usage data yet"
+                    : "Current usage"}
                 </h2>
                 <p>
-                  {usageDescription(providers)}
+                  {usageDescription(providers, visibleProviders)}
                   <br />
                   Allowances and reset times appear when data is available.
                 </p>
@@ -187,17 +192,17 @@ export default function App() {
             <section aria-labelledby="providers-heading">
               <div className="section-heading">
                 <h2 id="providers-heading">Providers</h2>
-                <span>
-                  {providers.length === 0 ? "0 connected" : "1 demo provider"}
-                </span>
+                <span>{providersCount(providers, visibleProviders)}</span>
               </div>
               <div className="providers">
                 {providers.length === 0 ? (
                   <ProviderUnavailable />
                 ) : (
-                  providers.map((provider, index) => (
+                  visibleProviders.map((provider, index) => (
                     <ProviderCard
-                      key={provider.snapshot?.providerId ?? `error-${index}`}
+                      key={
+                        provider.snapshot?.providerId ?? `error-${index}`
+                      }
                       provider={provider}
                     />
                   ))
@@ -205,7 +210,7 @@ export default function App() {
               </div>
             </section>
             <div className="bottom-note">
-              <span>{usageNote(providers)}</span>
+              <span>{usageNote(providers, visibleProviders)}</span>
               <button disabled={!native} onClick={() => void hide()}>
                 Hide to tray <span aria-hidden="true">↘</span>
               </button>
@@ -321,20 +326,40 @@ function hasLiveData(providers: ProviderOverview[]) {
   );
 }
 
-function usageDescription(providers: ProviderOverview[]) {
+function providersCount(
+  providers: ProviderOverview[],
+  visible: ProviderOverview[],
+) {
+  if (providers.length === 0) return "0 connected";
+  const hidden = providers.length - visible.length;
+  return hidden > 0
+    ? `${visible.length} shown · ${hidden} unsubscribed`
+    : `${visible.length} shown`;
+}
+
+function usageDescription(
+  providers: ProviderOverview[],
+  visible: ProviderOverview[],
+) {
   if (providers.length === 0) {
     return "Provider connections are not available in this build.";
   }
-  return hasLiveData(providers)
+  if (visible.length === 0) {
+    return "No subscribed providers right now; they return automatically when resubscribed.";
+  }
+  return hasLiveData(visible)
     ? "Cards show live quota from your configured logins; demo cards stay labeled."
     : "Demo providers exercise Ellie's display and are not account data.";
 }
 
-function usageNote(providers: ProviderOverview[]) {
+function usageNote(providers: ProviderOverview[], visible: ProviderOverview[]) {
   if (providers.length === 0) {
     return "No provider requests.";
   }
-  return hasLiveData(providers)
+  if (visible.length === 0) {
+    return "Unsubscribed providers are hidden; resubscribe to bring them back.";
+  }
+  return hasLiveData(visible)
     ? "Live data comes from your codex CLI login on this machine; no token is stored."
     : "No provider requests. Demo data is illustrative only.";
 }
