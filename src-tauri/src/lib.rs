@@ -1,0 +1,66 @@
+mod commands;
+pub mod error;
+mod settings;
+mod storage;
+mod tray;
+
+use commands::AppState;
+use error::AppError;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use tauri::Manager;
+
+pub fn run() -> Result<(), AppError> {
+    let _ = tracing_subscriber::fmt()
+        .json()
+        .with_target(false)
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
+    tauri::Builder::default()
+        .setup(|app| {
+            let database_path = app
+                .path()
+                .app_local_data_dir()
+                .map_err(|_| AppError::Storage)?
+                .join("ellie.sqlite3");
+            let path = database_path.clone();
+            // Setup must finish before exposing IPC; SQLite itself runs on a blocking worker.
+            let settings =
+                tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking(move || {
+                    storage::initialize(&path)
+                }))
+                .map_err(|_| AppError::Background)??;
+            app.manage(AppState {
+                database_path,
+                close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
+                settings_view: AtomicBool::new(false),
+                settings_write: tokio::sync::Mutex::new(()),
+            });
+            tray::create(app.handle()).map_err(|_| AppError::Startup)?;
+            tracing::info!(event = "app_started", schema_version = 1);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::get_bootstrap,
+            commands::save_settings,
+            commands::hide_to_tray
+        ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window
+                    .state::<AppState>()
+                    .close_to_tray
+                    .load(Ordering::Relaxed)
+                {
+                    api.prevent_close();
+                    if window.hide().is_err() {
+                        tracing::warn!(event = "window_hide_failed");
+                    }
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .map_err(|_| AppError::Startup)
+}
