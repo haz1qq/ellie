@@ -132,6 +132,7 @@ pub async fn save_settings(
     settings: Settings,
     state: State<'_, AppState>,
 ) -> Result<Settings, AppError> {
+    settings.validate()?;
     let _guard = state.settings_write.lock().await;
     let path = state.database_path.clone();
     let value = settings.clone();

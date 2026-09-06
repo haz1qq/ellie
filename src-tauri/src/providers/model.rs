@@ -163,6 +163,9 @@ impl UsageSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderOverview {
+    /// Registry identity remains available even if fetching fails.
+    pub provider_id: String,
+    pub display_name: String,
     pub snapshot: Option<UsageSnapshot>,
     pub error: Option<ProviderError>,
 }
