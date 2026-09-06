@@ -9,19 +9,27 @@ use std::{
 use serde::Serialize;
 use tauri::{Manager, State};
 
-use crate::{error::AppError, settings::Settings, storage};
+use crate::{
+    error::AppError,
+    providers::{ProviderOverview, ProviderRegistry},
+    settings::Settings,
+    storage,
+};
 
 pub struct AppState {
     pub database_path: PathBuf,
     pub close_to_tray: Arc<AtomicBool>,
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
+    pub provider_registry: ProviderRegistry,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Bootstrap {
     settings: Settings,
     view: &'static str,
+    providers: Vec<ProviderOverview>,
 }
 
 #[tauri::command]
@@ -30,6 +38,7 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppE
     let settings = tauri::async_runtime::spawn_blocking(move || storage::read_settings(&path))
         .await
         .map_err(|_| AppError::Background)??;
+    let providers = state.provider_registry.refresh_all().await;
     Ok(Bootstrap {
         settings,
         view: if state.settings_view.load(Ordering::Relaxed) {
@@ -37,6 +46,7 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppE
         } else {
             "dashboard"
         },
+        providers,
     })
 }
 

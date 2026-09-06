@@ -1,5 +1,6 @@
 mod commands;
 pub mod error;
+pub mod providers;
 mod settings;
 mod storage;
 mod tray;
@@ -37,6 +38,11 @@ pub fn run() -> Result<(), AppError> {
                 close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
+                provider_registry: {
+                    let mut registry = providers::ProviderRegistry::default();
+                    registry.register(Arc::new(providers::MockProvider));
+                    registry
+                },
             });
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
             tracing::info!(event = "app_started", schema_version = 1);
