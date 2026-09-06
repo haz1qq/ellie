@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Cat } from "./components/Cat";
 import { copy } from "./copy";
-import { desktop, type Settings, type View } from "./lib/desktop";
-
-const plannedProviders = [
-  { name: "OpenAI / Codex", symbol: "O" },
-  { name: "Anthropic / Claude", symbol: "A" },
-  { name: "DeepSeek", symbol: "D" },
-];
+import {
+  desktop,
+  type ProviderOverview,
+  type Settings,
+  type UsageSnapshot,
+  type View,
+} from "./lib/desktop";
 
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
@@ -18,6 +18,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [providers, setProviders] = useState<ProviderOverview[]>([]);
   const native = desktop.available();
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export default function App() {
           setSettings(result.settings);
           setDraft(result.settings);
           setView(result.view);
+          setProviders(result.providers ?? []);
         }
       } catch {
         if (active)
@@ -172,9 +174,15 @@ export default function App() {
                 —
               </span>
               <div>
-                <h2 id="usage-title">No usage data yet</h2>
+                <h2 id="usage-title">
+                  {providers.length === 0
+                    ? "No usage data yet"
+                    : "Demo provider data"}
+                </h2>
                 <p>
-                  Provider connections are not available in this build.
+                  {providers.length === 0
+                    ? "Provider connections are not available in this build."
+                    : "This sample exercises Ellie's provider-neutral display. It is not account data."}
                   <br />
                   Allowances and reset times will appear when data is available.
                 </p>
@@ -183,25 +191,25 @@ export default function App() {
             <section aria-labelledby="providers-heading">
               <div className="section-heading">
                 <h2 id="providers-heading">Providers</h2>
-                <span>0 connected</span>
+                <span>
+                  {providers.length === 0 ? "0 connected" : "1 demo provider"}
+                </span>
               </div>
               <div className="providers">
-                {plannedProviders.map((provider) => (
-                  <article className="provider" key={provider.name}>
-                    <span className="provider-symbol" aria-hidden="true">
-                      {provider.symbol}
-                    </span>
-                    <div className="provider-name">
-                      <h3>{provider.name}</h3>
-                      <p>Connection support is planned</p>
-                    </div>
-                    <span className="unavailable">Not available yet</span>
-                  </article>
-                ))}
+                {providers.length === 0 ? (
+                  <ProviderUnavailable />
+                ) : (
+                  providers.map((provider, index) => (
+                    <ProviderCard
+                      key={provider.snapshot?.providerId ?? `error-${index}`}
+                      provider={provider}
+                    />
+                  ))
+                )}
               </div>
             </section>
             <div className="bottom-note">
-              <span>No provider requests. No usage estimates.</span>
+              <span>No provider requests. Demo data is illustrative only.</span>
               <button disabled={!native} onClick={() => void hide()}>
                 Hide to tray <span aria-hidden="true">↘</span>
               </button>
@@ -309,4 +317,117 @@ function Setting({
       />
     </label>
   );
+}
+
+function ProviderUnavailable() {
+  return (
+    <article className="provider">
+      <span className="provider-symbol" aria-hidden="true">
+        —
+      </span>
+      <div className="provider-name">
+        <h3>No provider data</h3>
+        <p>Connections will be added in a later milestone.</p>
+      </div>
+      <span className="unavailable">Not available yet</span>
+    </article>
+  );
+}
+
+function ProviderCard({ provider }: { provider: ProviderOverview }) {
+  if (!provider.snapshot) {
+    return (
+      <article className="provider">
+        <div className="provider-name">
+          <h3>Provider unavailable</h3>
+          <p>Ellie kept other provider results available.</p>
+        </div>
+        <span className="unavailable">
+          {provider.error?.replaceAll("_", " ")}
+        </span>
+      </article>
+    );
+  }
+  const { snapshot } = provider;
+  return (
+    <article className="provider provider-card">
+      <div className="provider-card-header">
+        <span className="provider-symbol" aria-hidden="true">
+          E
+        </span>
+        <div className="provider-name">
+          <h3>{snapshot.displayName}</h3>
+          <p>
+            {snapshot.accountLabel} · {snapshot.plan}
+          </p>
+        </div>
+        <span className="mock-badge">Mock data</span>
+      </div>
+      {snapshot.capabilities.quotaWindows &&
+        snapshot.windows.map((window) => (
+          <UsageWindowCard key={window.id} window={window} />
+        ))}
+      {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
+        <div className="token-summary">
+          <span>Sample token activity</span>
+          <span>
+            {formatCount(snapshot.tokenUsage.totalTokens)} tokens ·{" "}
+            {formatCount(snapshot.tokenUsage.requestCount)} requests
+          </span>
+          <small>Locally calculated sample · illustrative only</small>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function UsageWindowCard({
+  window,
+}: {
+  window: UsageSnapshot["windows"][number];
+}) {
+  const used = window.usedPercent;
+  const remaining = window.remainingPercent;
+  return (
+    <div className="usage-window">
+      <div className="usage-window-title">
+        <strong>{window.label}</strong>
+        <span>Demo data</span>
+      </div>
+      {used !== null && (
+        <>
+          <div
+            className="usage-track"
+            role="progressbar"
+            aria-label={`${window.label}: ${used}% used, illustrative data`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={used}
+          >
+            <span style={{ width: `${used}%` }} />
+          </div>
+          <div className="usage-summary">
+            <span>{used}% used</span>
+            <span>
+              {remaining ?? "—"}% remaining · {formatReset(window.resetAt)}
+            </span>
+          </div>
+        </>
+      )}
+      <small>
+        Illustrative provider-reported sample · no connected account
+      </small>
+    </div>
+  );
+}
+
+function formatCount(value: number | null) {
+  return value === null ? "—" : new Intl.NumberFormat().format(value);
+}
+function formatReset(value: string | null) {
+  if (!value) return "Reset unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Reset unavailable"
+    : `Sample reset ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
