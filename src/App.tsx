@@ -175,16 +175,12 @@ export default function App() {
               </span>
               <div>
                 <h2 id="usage-title">
-                  {providers.length === 0
-                    ? "No usage data yet"
-                    : "Demo provider data"}
+                  {providers.length === 0 ? "No usage data yet" : "Current usage"}
                 </h2>
                 <p>
-                  {providers.length === 0
-                    ? "Provider connections are not available in this build."
-                    : "This sample exercises Ellie's provider-neutral display. It is not account data."}
+                  {usageDescription(providers)}
                   <br />
-                  Allowances and reset times will appear when data is available.
+                  Allowances and reset times appear when data is available.
                 </p>
               </div>
             </section>
@@ -209,7 +205,7 @@ export default function App() {
               </div>
             </section>
             <div className="bottom-note">
-              <span>No provider requests. Demo data is illustrative only.</span>
+              <span>{usageNote(providers)}</span>
               <button disabled={!native} onClick={() => void hide()}>
                 Hide to tray <span aria-hidden="true">↘</span>
               </button>
@@ -319,6 +315,30 @@ function Setting({
   );
 }
 
+function hasLiveData(providers: ProviderOverview[]) {
+  return providers.some(
+    (provider) => provider.snapshot?.dataKind === "live",
+  );
+}
+
+function usageDescription(providers: ProviderOverview[]) {
+  if (providers.length === 0) {
+    return "Provider connections are not available in this build.";
+  }
+  return hasLiveData(providers)
+    ? "Cards show live quota from your configured logins; demo cards stay labeled."
+    : "Demo providers exercise Ellie's display and are not account data.";
+}
+
+function usageNote(providers: ProviderOverview[]) {
+  if (providers.length === 0) {
+    return "No provider requests.";
+  }
+  return hasLiveData(providers)
+    ? "Live data comes from your codex CLI login on this machine; no token is stored."
+    : "No provider requests. Demo data is illustrative only.";
+}
+
 function ProviderUnavailable() {
   return (
     <article className="provider">
@@ -361,11 +381,17 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
             {snapshot.accountLabel} · {snapshot.plan}
           </p>
         </div>
-        <span className="mock-badge">Mock data</span>
+        {snapshot.dataKind === "mock" && (
+          <span className="mock-badge">Mock data</span>
+        )}
       </div>
       {snapshot.capabilities.quotaWindows &&
         snapshot.windows.map((window) => (
-          <UsageWindowCard key={window.id} window={window} />
+          <UsageWindowCard
+            key={window.id}
+            window={window}
+            dataKind={snapshot.dataKind}
+          />
         ))}
       {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
         <div className="token-summary">
@@ -383,8 +409,10 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
 
 function UsageWindowCard({
   window,
+  dataKind,
 }: {
   window: UsageSnapshot["windows"][number];
+  dataKind: UsageSnapshot["dataKind"];
 }) {
   const used = window.usedPercent;
   const remaining = window.remainingPercent;
@@ -392,14 +420,20 @@ function UsageWindowCard({
     <div className="usage-window">
       <div className="usage-window-title">
         <strong>{window.label}</strong>
-        <span>Demo data</span>
+        <span>
+          {dataKind === "mock"
+            ? "Demo data"
+            : window.source === "provider_reported"
+              ? "Provider-reported"
+              : "Estimated"}
+        </span>
       </div>
       {used !== null && (
         <>
           <div
             className="usage-track"
             role="progressbar"
-            aria-label={`${window.label}: ${used}% used, illustrative data`}
+            aria-label={`${window.label}: ${used}% used, ${dataKind === "mock" ? "illustrative data" : "provider data"}`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={used}
@@ -409,13 +443,15 @@ function UsageWindowCard({
           <div className="usage-summary">
             <span>{used}% used</span>
             <span>
-              {remaining ?? "—"}% remaining · {formatReset(window.resetAt)}
+              {remaining ?? "—"}% remaining · {formatReset(window.resetAt, dataKind)}
             </span>
           </div>
         </>
       )}
       <small>
-        Illustrative provider-reported sample · no connected account
+        {dataKind === "mock"
+          ? "Illustrative provider-reported sample · no connected account"
+          : "Provider-reported quota · remaining and reset are derived by Ellie"}
       </small>
     </div>
   );
@@ -424,10 +460,16 @@ function UsageWindowCard({
 function formatCount(value: number | null) {
   return value === null ? "—" : new Intl.NumberFormat().format(value);
 }
-function formatReset(value: string | null) {
+function formatReset(
+  value: string | null,
+  dataKind: UsageSnapshot["dataKind"],
+) {
   if (!value) return "Reset unavailable";
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Reset unavailable"
-    : `Sample reset ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  if (Number.isNaN(date.getTime())) return "Reset unavailable";
+  const time = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return dataKind === "mock" ? `Sample reset ${time}` : `Resets ${time}`;
 }

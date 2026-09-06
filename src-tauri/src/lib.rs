@@ -41,6 +41,7 @@ pub fn run() -> Result<(), AppError> {
                 settings_write: tokio::sync::Mutex::new(()),
                 provider_registry: {
                     let mut registry = providers::ProviderRegistry::default();
+                    registry.register(Arc::new(providers::OpenAiProvider));
                     registry.register(Arc::new(providers::MockProvider));
                     registry
                 },

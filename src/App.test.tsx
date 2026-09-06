@@ -53,6 +53,48 @@ const demoProviders: ProviderOverview[] = [
   },
 ];
 
+const liveProviders: ProviderOverview[] = [
+  {
+    snapshot: {
+      providerId: "openai-codex",
+      displayName: "OpenAI / Codex",
+      accountLabel: "acct_…",
+      plan: "plus",
+      capabilities: {
+        quotaWindows: true,
+        tokenUsage: false,
+        accountBalance: false,
+        credits: true,
+        costTracking: false,
+        localHistory: false,
+      },
+      authState: "authenticated",
+      dataKind: "live",
+      windows: [
+        {
+          id: "primary",
+          label: "5-hour limit",
+          usedPercent: 25,
+          remainingPercent: 75,
+          resetAt: "2026-09-06T21:00:00Z",
+          source: "provider_reported",
+        },
+        {
+          id: "secondary",
+          label: "Weekly limit",
+          usedPercent: 40,
+          remainingPercent: 60,
+          resetAt: "2026-09-07T21:00:00Z",
+          source: "provider_reported",
+        },
+      ],
+      tokenUsage: null,
+      fetchedAt: "2026-09-06T14:00:00Z",
+    },
+    error: null,
+  },
+];
+
 beforeEach(() => {
   vi.mocked(desktop.available).mockReturnValue(true);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
@@ -81,6 +123,36 @@ describe("bootstrap shell", () => {
     ).toBeVisible();
     expect(screen.getByText(/Locally calculated sample/)).toBeVisible();
     expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
+    expect(screen.getByText("Current usage")).toBeVisible();
+    expect(
+      screen.getByText(/Demo providers exercise Ellie's display/),
+    ).toBeVisible();
+  });
+
+  it("renders live quota with provider provenance and no demo labels", async () => {
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: liveProviders,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("OpenAI / Codex")).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+    expect(screen.getByText("5-hour limit")).toBeVisible();
+    expect(screen.getByText("Weekly limit")).toBeVisible();
+    const primary = screen.getByRole("progressbar", {
+      name: "5-hour limit: 25% used, provider data",
+    });
+    expect(primary).toHaveAttribute("aria-valuenow", "25");
+    expect(screen.getAllByText("Provider-reported").length).toBe(2);
+    expect(screen.getAllByText(/Resets \d/).length).toBe(2);
+    expect(
+      screen.getByText(/Live data comes from your codex CLI login/),
+    ).toBeVisible();
+    expect(screen.queryByText("Sample reset")).not.toBeInTheDocument();
   });
 
   it("keeps browser preview separate from desktop settings", async () => {

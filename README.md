@@ -19,13 +19,14 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
 
 ## Current scope
 
-- Dark React dashboard with a static illustrative cat and optional friendly copy.
+- Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
+- OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, resets, plan, credits) through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, notification table stubs).
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - Three persisted preferences: close to tray, dashboard mascot, and friendly messages.
-- Structured JSON lifecycle logs to stdout. No provider calls, credentials, telemetry, polling, notifications, or local API in this milestone.
+- Structured JSON lifecycle logs to stdout. No credentials, telemetry, polling, notifications, or local API in this milestone.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
@@ -39,7 +40,7 @@ npm run build
 npm run check:rust
 ```
 
-See [milestone 0 verification](docs/milestone-0.md) for checks actually completed and Windows smoke-test status. Packaging is milestone 10; bundling is intentionally disabled.
+See [milestone 3 verification](docs/milestone-3.md) and the [OpenAI / Codex provider notes](docs/providers/openai.md) for checks actually completed and live smoke-test status. Packaging is milestone 10; bundling is intentionally disabled.
 
 ## Project documentation
 
