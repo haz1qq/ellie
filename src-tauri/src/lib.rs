@@ -1,5 +1,6 @@
 mod commands;
 pub mod error;
+pub mod history;
 pub mod providers;
 mod settings;
 mod storage;
@@ -34,7 +35,7 @@ pub fn run() -> Result<(), AppError> {
                 }))
                 .map_err(|_| AppError::Background)??;
             app.manage(AppState {
-                database_path,
+                database_path: database_path.clone(),
                 close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
@@ -44,6 +45,7 @@ pub fn run() -> Result<(), AppError> {
                     registry
                 },
             });
+            spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
             tracing::info!(event = "app_started", schema_version = 1);
             Ok(())
@@ -69,4 +71,39 @@ pub fn run() -> Result<(), AppError> {
         })
         .run(tauri::generate_context!())
         .map_err(|_| AppError::Startup)
+}
+
+/// Runs retention cleanup on a blocking worker while the app is alive. The
+/// first tick fires immediately, so expired history is also removed at
+/// startup. Cleanup never blocks the UI or the async executor.
+fn spawn_history_cleanup(database_path: std::path::PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(history::HISTORY_CLEANUP_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let path = database_path.clone();
+            let result = tokio::time::timeout(
+                history::HISTORY_CLEANUP_TIMEOUT,
+                tauri::async_runtime::spawn_blocking(move || {
+                    history::cleanup_history(&path, history::HISTORY_RETENTION)
+                }),
+            )
+            .await;
+            match result {
+                Ok(Ok(Ok(deleted))) => {
+                    tracing::info!(event = "history_cleanup", deleted = deleted);
+                }
+                Ok(Ok(Err(error))) => {
+                    tracing::warn!(event = "history_cleanup_failed", error = ?error);
+                }
+                Ok(Err(_)) => {
+                    tracing::warn!(event = "history_cleanup_failed");
+                }
+                Err(_) => {
+                    tracing::warn!(event = "history_cleanup_timed_out");
+                }
+            }
+        }
+    });
 }
