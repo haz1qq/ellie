@@ -8,7 +8,7 @@ This is Ellie's product and engineering specification. It preserves the full 78-
 
 Use this file for product scope and architecture, and `AGENTS.md` for concise coding-agent instructions. Keep both aligned when requirements change.
 
-Current implementation: milestone 0 bootstrap is implemented and under Windows smoke verification on `feat/bootstrap`. The project uses npm and `package-lock.json`. Automated frontend and Rust checks pass; provider integrations and milestone 1 have not started. See `docs/milestone-0.md` for evidence and remaining acceptance checks.
+Current implementation: milestone 0 bootstrap is complete on `feat/bootstrap`. The project uses npm and `package-lock.json`. Automated frontend and Rust checks passed, and the owner confirmed the Windows smoke checklist passed. Provider integrations and milestone 1 have not started. See `docs/milestone-0.md` for verification evidence and its scope.
 
 The milestones and checklists describe intended deliverables, not completed implementation. Provider fields, API responses, and Rust models are conceptual examples until verified and implemented. Actual provider capabilities must be researched during the relevant integration milestone; never treat example quotas as evidence of live support.
 

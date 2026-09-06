@@ -1,6 +1,6 @@
 # Milestone 0 verification
 
-Status: implemented, with Windows acceptance checks still outstanding. Milestone 0 is not marked complete. Milestone 1 has not started.
+Status: milestone 0 complete. Automated checks passed, and the owner confirmed all items in the Windows smoke checklist passed. Milestone 1 has not started.
 
 ## Automated checks
 
@@ -20,7 +20,7 @@ Frontend coverage includes unavailable-provider presentation, browser preview is
 
 ## Windows smoke checks
 
-Verified:
+Agent-verified:
 
 - `npm run tauri dev` compiles and launches the native Ellie window.
 - Native dashboard loads settings through the restricted IPC contract.
@@ -29,18 +29,18 @@ Verified:
 - Closing the window removes it from the visible window list while the same Ellie process remains running.
 - Browser preview layout inspected at desktop width and at 420px. No invented quota bars or values appear; controls and provider labels remain readable.
 
-Still needs manual verification:
+Owner-verified (reported “all pass” in response to the Windows smoke checklist):
 
 - Minimize and restore through the taskbar.
 - Left-click the cat tray icon to restore and focus Overview.
 - Right-click the tray icon: Open Ellie and Settings work; Refresh is disabled.
 - Hide to tray button and close-to-tray disabled behavior.
 - Quit Ellie removes both the process and tray icon cleanly.
-- Dashboard mascot toggle, keyboard focus/navigation, and tray icon readability on light and dark Windows taskbars.
+- Dashboard mascot and friendly-message preferences save and survive restarting.
 
-The Windows automation tool exposes Ellie's accessibility controls but did not expose the notification area. Native screenshot capture showed an overlapping window, so browser layout verification does not count as native tray visual verification. These limitations are not passing acceptance evidence.
+The tray results above are owner-reported, not agent-automated. The Windows automation tool did not expose the notification area, and native screenshot capture showed an overlapping window. Browser layout verification does not count as native tray visual verification. Detailed keyboard focus/navigation and icon contrast on both light and dark taskbars were not individually covered by the reported checklist and remain additional accessibility review items.
 
-Ellie was left running in the tray after the close-to-tray check. The development server remains on `127.0.0.1:1420` while `npm run tauri dev` runs.
+During development, the frontend server uses `127.0.0.1:1420` while `npm run tauri dev` runs.
 
 ## Scope limits
 

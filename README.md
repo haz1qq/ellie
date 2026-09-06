@@ -2,7 +2,7 @@
 
 One place to see how much AI you have left.
 
-Ellie is a lightweight, local-first Windows tray app with a quiet black-and-white cat personality. **Milestone 0 is implemented and awaiting the remaining Windows smoke checks.** The shell does not connect to providers or show sample quota values.
+Ellie is a lightweight, local-first Windows tray app with a quiet black-and-white cat personality. **Milestone 0 is complete**, with automated checks passed and Windows smoke checks confirmed by the owner. The shell does not connect to providers or show sample quota values.
 
 ## Development
 
