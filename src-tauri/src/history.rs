@@ -33,8 +33,8 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
     transaction.execute(
         "INSERT INTO usage_snapshots
              (provider_id, account_id, fetched_at, data_kind, auth_state,
-              capabilities_json, credits, balance)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+              capabilities_json, credits, balance, has_subscription)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             provider_id,
             account_id,
@@ -44,6 +44,7 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
             serde_json::to_string(&snapshot.capabilities).map_err(|_| AppError::Storage)?,
             snapshot.credits,
             snapshot.balance,
+            snapshot.has_subscription.map(|value| value as i64),
         ],
     )?;
     let snapshot_id = transaction.last_insert_rowid();
@@ -252,12 +253,13 @@ struct RawSnapshot {
     capabilities_json: String,
     credits: Option<f64>,
     balance: Option<f64>,
+    has_subscription: Option<bool>,
 }
 
 fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnapshot, AppError> {
     let raw: RawSnapshot = connection.query_row(
         "SELECT provider_id, account_id, fetched_at, data_kind, auth_state,
-                capabilities_json, credits, balance
+                capabilities_json, credits, balance, has_subscription
          FROM usage_snapshots WHERE id = ?1",
         params![snapshot_id],
         |row| {
@@ -270,6 +272,9 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
                 capabilities_json: row.get(5)?,
                 credits: row.get(6)?,
                 balance: row.get(7)?,
+                has_subscription: row
+                    .get(8)
+                    .map(|value: Option<i64>| value.map(|value| value != 0))?,
             })
         },
     )?;
@@ -300,6 +305,7 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
         display_name,
         account_label,
         plan,
+        has_subscription: raw.has_subscription,
         capabilities,
         auth_state: parse_auth_state(&raw.auth_state)?,
         data_kind: parse_data_kind(&raw.data_kind)?,
@@ -486,6 +492,7 @@ mod tests {
                 ..ProviderCapabilities::default()
             },
             auth_state: AuthState::Authenticated,
+            has_subscription: None,
             data_kind: DataKind::Live,
             windows: vec![UsageWindow {
                 id: "weekly".into(),
@@ -567,8 +574,15 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let path = temp.path().join("ellie.sqlite3");
         initialize(&path);
-        let first = sample_snapshot("alpha", "Alpha", utc_ms(1_700_000_000, 0));
-        let second = sample_snapshot("alpha", "Alpha", utc_ms(1_700_000_060, 0));
+        let template = sample_snapshot("alpha", "Alpha", utc_ms(1_700_000_000, 0));
+        let first = UsageSnapshot {
+            has_subscription: Some(true),
+            ..template.clone()
+        };
+        let second = UsageSnapshot {
+            has_subscription: Some(false),
+            ..template
+        };
         let third = sample_snapshot("alpha", "Alpha", utc_ms(1_700_000_120, 0));
         let other = sample_snapshot("beta", "Beta", utc_ms(1_700_000_180, 0));
         for snapshot in [&first, &second, &third, &other] {
@@ -634,6 +648,36 @@ mod tests {
         let count: i64 =
             connection.query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))?;
         assert_eq!(count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn subscription_flag_roundtrips_through_storage() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        initialize(&path);
+        let subscribed = UsageSnapshot {
+            has_subscription: Some(true),
+            ..sample_snapshot("alpha", "Alpha", utc_ms(1_700_000_000, 0))
+        };
+        let unsubscribed = UsageSnapshot {
+            has_subscription: Some(false),
+            ..sample_snapshot("beta", "Beta", utc_ms(1_700_000_060, 0))
+        };
+        insert_snapshot(&path, &subscribed)?;
+        insert_snapshot(&path, &unsubscribed)?;
+        assert_eq!(
+            latest_snapshot(&path, "alpha")?
+                .expect("alpha")
+                .has_subscription,
+            Some(true)
+        );
+        assert_eq!(
+            latest_snapshot(&path, "beta")?
+                .expect("beta")
+                .has_subscription,
+            Some(false)
+        );
         Ok(())
     }
 
