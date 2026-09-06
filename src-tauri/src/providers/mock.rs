@@ -63,6 +63,8 @@ impl UsageProvider for MockProvider {
             credits: None,
             balance: None,
             balance_currency: None,
+            spend_estimate: None,
+            model: None,
             token_usage: Some(TokenUsage {
                 total_tokens: Some(145_000),
                 request_count: Some(28),

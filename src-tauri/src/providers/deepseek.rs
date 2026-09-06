@@ -11,9 +11,6 @@ use super::{
 
 const PROVIDER_ID: &str = "deepseek";
 const DISPLAY_NAME: &str = "DeepSeek";
-/// DeepSeek API key from platform.deepseek.com. Read from the environment
-/// only; never stored or logged by Ellie.
-const API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 const API_BASE_URL: &str = "https://api.deepseek.com";
 const BALANCE_PATH: &str = "/user/balance";
 /// Prefer USD balances when the response reports multiple currencies.
@@ -49,16 +46,23 @@ impl UsageProvider for DeepSeekProvider {
     }
 
     async fn detect(&self) -> Result<DetectionResult, ProviderError> {
-        Ok(detect_state())
+        Ok(detect_state().await)
     }
 
     async fn authenticate(&self) -> Result<AuthState, ProviderError> {
-        // Key entry UI is deferred; report the detected state.
-        Ok(detect_state().auth_state)
+        // Key entry happens through the Settings UI; report the detected state.
+        Ok(detect_state().await.auth_state)
     }
 
     async fn fetch_usage(&self) -> Result<UsageSnapshot, ProviderError> {
-        let key = std::env::var(API_KEY_ENV).map_err(|_| ProviderError::AuthenticationRequired)?;
+        let store = crate::credentials::WindowsCredentialStore;
+        let key = tokio::task::spawn_blocking(move || {
+            crate::credentials::provider_key(&store, PROVIDER_ID)
+        })
+        .await
+        .map_err(|_| ProviderError::Unavailable)?
+        .map_err(|_| ProviderError::Unavailable)?
+        .ok_or(ProviderError::AuthenticationRequired)?;
         let api = DeepSeekApi::with_key(API_BASE_URL.to_string(), key);
         let balance = fetch_balance(&api).await?;
         Ok(balance_snapshot(balance))
@@ -138,6 +142,8 @@ fn balance_snapshot(balance: Balance) -> UsageSnapshot {
         credits: None,
         balance: balance.value,
         balance_currency: balance.currency,
+        spend_estimate: None,
+        model: None,
         token_usage: None,
         fetched_at: Utc::now(),
     }
@@ -178,25 +184,34 @@ fn parse_balance(body: &Value) -> Result<Balance, ProviderError> {
     Ok(Balance { value, currency })
 }
 
-fn detect_state() -> DetectionResult {
-    if std::env::var(API_KEY_ENV).is_ok() {
-        DetectionResult {
-            auth_state: AuthState::AuthenticationDetected,
-            detail: Some(
-                "DeepSeek API key found in the environment; account balance is read through \
-                 the official /user/balance endpoint."
-                    .to_string(),
-            ),
+async fn detect_state() -> DetectionResult {
+    let store = crate::credentials::WindowsCredentialStore;
+    let source = tokio::task::spawn_blocking(move || {
+        crate::credentials::provider_key_status(&store, PROVIDER_ID).ok()
+    })
+    .await
+    .unwrap_or(None)
+    .unwrap_or(crate::credentials::KeySource::None);
+    match source {
+        crate::credentials::KeySource::Environment | crate::credentials::KeySource::CredentialManager => {
+            DetectionResult {
+                auth_state: AuthState::AuthenticationDetected,
+                detail: Some(
+                    "DeepSeek API key found (environment or Windows Credential Manager); account \
+                     balance is read through the official /user/balance endpoint."
+                        .to_string(),
+                ),
+            }
         }
-    } else {
-        DetectionResult {
+        crate::credentials::KeySource::None => DetectionResult {
             auth_state: AuthState::AuthenticationRequired,
             detail: Some(
-                "Set DEEPSEEK_API_KEY to a key from platform.deepseek.com. There are no quota \
-                 windows on DeepSeek; Ellie shows your account balance only."
+                "Add a DeepSeek key from platform.deepseek.com in Settings → Provider credentials. \
+                 There are no quota windows on DeepSeek; Ellie shows your balance and an \
+                 estimated spend."
                     .to_string(),
             ),
-        }
+        },
     }
 }
 
@@ -301,13 +316,13 @@ mod tests {
         assert_eq!(snapshot.has_subscription, None);
     }
 
-    #[test]
-    fn detect_reports_missing_key() {
-        let previous = std::env::var(API_KEY_ENV).ok();
-        std::env::remove_var(API_KEY_ENV);
-        let state = detect_state();
+    #[tokio::test]
+    async fn detect_reports_missing_key() {
+        let previous = std::env::var("DEEPSEEK_API_KEY").ok();
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        let state = detect_state().await;
         if let Some(key) = previous {
-            std::env::set_var(API_KEY_ENV, key);
+            std::env::set_var("DEEPSEEK_API_KEY", key);
         }
         assert_eq!(state.auth_state, AuthState::AuthenticationRequired);
     }

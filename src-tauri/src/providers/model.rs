@@ -102,6 +102,18 @@ pub struct TokenUsage {
     pub source: MetricSource,
 }
 
+/// A locally-calculated spend estimate derived from provider-reported
+/// balance changes across stored snapshots. Never presented as official
+/// usage: top-ups raise the balance and granted-balance expiry lowers it,
+/// so this is an estimate with explicit limitations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpendEstimate {
+    pub amount: f64,
+    pub currency: String,
+    pub window_days: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSnapshot {
@@ -121,6 +133,11 @@ pub struct UsageSnapshot {
     pub balance: Option<f64>,
     /// ISO-4217 currency code for `balance` (for example `USD`, `CNY`).
     pub balance_currency: Option<String>,
+    /// Ellie's own estimate of spend from balance history, when computable.
+    pub spend_estimate: Option<SpendEstimate>,
+    /// Model in use or the dominant alias reported for the account, when the
+    /// source exposes one (`None` otherwise — never fabricated).
+    pub model: Option<String>,
     pub token_usage: Option<TokenUsage>,
     pub fetched_at: DateTime<Utc>,
 }
@@ -220,6 +237,8 @@ mod tests {
             credits: None,
             balance: Some(-0.01),
             balance_currency: None,
+            spend_estimate: None,
+            model: None,
             token_usage: None,
             fetched_at: Utc::now(),
         };
