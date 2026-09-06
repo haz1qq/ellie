@@ -8,7 +8,7 @@ This is Ellie's product and engineering specification. It preserves the full 78-
 
 Use this file for product scope and architecture, and `AGENTS.md` for concise coding-agent instructions. Keep both aligned when requirements change.
 
-Current implementation: milestone 0 bootstrap is complete on `feat/bootstrap`; milestone 1 provider framework is complete on `feat/provider-framework` (provider-neutral mock adapter only, not provider integrations); and milestone 2 SQLite/history is complete on `feat/sqlite-history` (versioned migrations, snapshot history with 90-day retention, provenance preserved). See `docs/milestone-0.md`, `docs/milestone-1.md`, and `docs/milestone-2.md` for scope and verification evidence.
+Current implementation: milestones 0–2 are complete (`feat/bootstrap`, `feat/provider-framework`, `feat/sqlite-history`), and milestone 3 OpenAI/Codex is complete on `feat/openai-codex` — a live provider that reads ChatGPT plan quota through the codex CLI's own app-server, reusing `codex login` without handling tokens. The demo provider remains registered alongside it. See `docs/milestone-0.md` … `docs/milestone-3.md` and `docs/providers/openai.md` for scope, sources, and verification evidence.
 
 The milestones and checklists describe intended deliverables, not completed implementation. Provider fields, API responses, and Rust models are conceptual examples until verified and implemented. Actual provider capabilities must be researched during the relevant integration milestone; never treat example quotas as evidence of live support.
 
