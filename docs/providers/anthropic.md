@@ -51,15 +51,24 @@ Response shapes (parsed leniently so unknown fields never crash a fetch):
 
 ## Authentication
 
-- The API key comes from the `ANTHROPIC_API_KEY` environment variable and
-  must be an **Admin API key** (`sk-ant-admin`) whose user has the
+- The Anthropic admin API key comes from Settings → Provider credentials
+  (stored in Windows Credential Manager) or the `ANTHROPIC_API_KEY`
+  environment variable (env wins). Keys are validated, never logged, and
+  only presence/status is exposed through IPC.
+- The key must be an **Admin API key** (`sk-ant-admin`) whose user has the
   roles/scopes to read usage and cost reports. The Admin API is unavailable
   for accounts that are not organizations with members.
-- Ellie never stores, writes, or logs the key; it is kept in memory for the
-  request and dropped.
-- Key-entry UI and keyring/Windows Credential Manager storage are deferred;
-  `detect()` reports `authentication_required` (with instructions) until the
-  variable is set. Token-refresh handling is not applicable (no OAuth here).
+- Token-refresh handling is not applicable (no OAuth here).
+
+## Model and token display
+
+- `model` is the dominant model in the report window (most tokens among the
+  rows that name a model): "Model: …" on the card. `None` when the report
+  does not name models — never invented.
+- The card shows the 30-day token breakdown: total, input/output
+  (`in` / `out`), cached input, and the summed cost — labeled
+  "locally calculated by Ellie (window chosen and summed from provider
+  buckets)".
 
 ## Fields
 

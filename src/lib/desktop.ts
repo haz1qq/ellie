@@ -6,6 +6,7 @@ export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;
   friendlyMessages: boolean;
+  hiddenProviderIds: string[];
 }
 export interface Bootstrap {
   settings: Settings;
@@ -33,9 +34,17 @@ export interface UsageWindow {
 }
 export interface TokenUsage {
   totalTokens: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cachedInputTokens?: number | null;
   requestCount: number | null;
   estimatedCostUsd: number | null;
   source: MetricSource;
+}
+export interface SpendEstimate {
+  amount: number;
+  currency: string;
+  windowDays: number;
 }
 export interface UsageSnapshot {
   providerId: string;
@@ -49,9 +58,18 @@ export interface UsageSnapshot {
   dataKind: DataKind;
   windows: UsageWindow[];
   tokenUsage: TokenUsage | null;
+  balance: number | null;
+  /** ISO-4217 code for `balance` (e.g. "USD", "CNY"); null when no balance is reported */
+  balanceCurrency: string | null;
+  /** Ellie's own estimate of spend from balance history, when computable */
+  spendEstimate: SpendEstimate | null;
+  /** Model in use or dominant alias reported by the provider, when available */
+  model: string | null;
   fetchedAt: string;
 }
 export interface ProviderOverview {
+  providerId: string;
+  displayName: string;
   snapshot: UsageSnapshot | null;
   error:
     | "invalid_snapshot"
@@ -59,6 +77,15 @@ export interface ProviderOverview {
     | "authentication_expired"
     | "unavailable"
     | null;
+}
+
+export type ProviderKeySource =
+  | "credential_manager"
+  | "environment"
+  | "none";
+export interface ProviderKeyStatus {
+  providerId: string;
+  source: ProviderKeySource;
 }
 
 export const desktop = {
@@ -69,4 +96,10 @@ export const desktop = {
   hide: () => invoke<void>("hide_to_tray"),
   onNavigate: (callback: (view: View) => void) =>
     listen<View>("navigate", (event) => callback(event.payload)),
+  saveProviderKey: (providerId: string, key: string) =>
+    invoke<void>("save_provider_key", { providerId, key }),
+  deleteProviderKey: (providerId: string) =>
+    invoke<void>("delete_provider_key", { providerId }),
+  providerKeyStatus: () =>
+    invoke<ProviderKeyStatus[]>("provider_key_status"),
 };

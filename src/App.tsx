@@ -3,6 +3,7 @@ import { Cat } from "./components/Cat";
 import { copy } from "./copy";
 import {
   desktop,
+  type ProviderKeySource,
   type ProviderOverview,
   type Settings,
   type UsageSnapshot,
@@ -21,9 +22,10 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
   const visibleProviders = providers.filter(
     (provider) =>
-      provider.snapshot
+      !(settings?.hiddenProviderIds ?? []).includes(provider.providerId) &&
+      (provider.snapshot
         ? provider.snapshot.hasSubscription !== false
-        : provider.error !== "authentication_required",
+        : provider.error !== "authentication_required"),
   );
   const native = desktop.available();
 
@@ -82,6 +84,31 @@ export default function App() {
       setError(
         "Your settings were not saved. Try again. Your previous settings are still active.",
       );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setProviderVisibility(providerId: string, visible: boolean) {
+    if (!settings || saving || !native) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    const hiddenProviderIds = visible
+      ? (settings.hiddenProviderIds ?? []).filter((id) => id !== providerId)
+      : [...new Set([...(settings.hiddenProviderIds ?? []), providerId])];
+    try {
+      const saved = await desktop.saveSettings({ ...settings, hiddenProviderIds });
+      setSettings(saved);
+      // Do not discard unsaved appearance edits when changing visibility.
+      setDraft((current) => current
+        ? { ...current, hiddenProviderIds: saved.hiddenProviderIds }
+        : saved);
+      setNotice(visible
+        ? "Provider display enabled. Unconfigured or unsubscribed providers stay hidden."
+        : "Provider hidden. Show it again in Settings → Provider visibility.");
+    } catch {
+      setError("Provider visibility was not saved. Your previous display settings are still active. Try again.");
     } finally {
       setSaving(false);
     }
@@ -160,6 +187,7 @@ export default function App() {
             )}
           </div>
         )}
+        {notice && view === "dashboard" && <p role="status">{notice}</p>}
         {loading && <p role="status">Opening your local settings…</p>}
         {view === "dashboard" ? (
           <>
@@ -201,12 +229,12 @@ export default function App() {
                 {providers.length === 0 ? (
                   <ProviderUnavailable />
                 ) : (
-                  visibleProviders.map((provider, index) => (
+                  visibleProviders.map((provider) => (
                     <ProviderCard
-                      key={
-                        provider.snapshot?.providerId ?? `error-${index}`
-                      }
+                      key={provider.providerId}
                       provider={provider}
+                      hideDisabled={saving || !settings || !native || !provider.providerId}
+                      onHide={() => void setProviderVisibility(provider.providerId, false)}
                     />
                   ))
                 )}
@@ -278,6 +306,28 @@ export default function App() {
                 <p>Open the desktop app to manage your local preferences.</p>
               )
             )}
+            {settings && (
+              <fieldset className="provider-visibility" disabled={saving || !native}>
+                <legend>Provider visibility</legend>
+                <p>
+                  Changes save immediately. Hidden cards keep their credentials,
+                  history, and data fetching. Unconfigured or unsubscribed providers
+                  remain hidden until active.
+                </p>
+                {providers.map((provider) => (
+                  <Setting
+                    key={provider.providerId}
+                    label={`Show ${provider.displayName} on dashboard`}
+                    detail={provider.snapshot?.dataKind === "mock"
+                      ? "Demo provider · illustrative data, not a connected account."
+                      : "Display preference only; this does not disconnect your account."}
+                    checked={!(settings.hiddenProviderIds ?? []).includes(provider.providerId)}
+                    onChange={(visible) => void setProviderVisibility(provider.providerId, visible)}
+                  />
+                ))}
+              </fieldset>
+            )}
+            <ProviderCredentials />
             <div className="settings-note">
               <h2>Dark mode, by default.</h2>
               <p>
@@ -294,6 +344,127 @@ export default function App() {
         <span>Trust the number.</span>
       </footer>
     </div>
+  );
+}
+
+function ProviderCredentials() {
+  const [status, setStatus] = useState<Map<string, ProviderKeySource>>(
+    new Map(),
+  );
+  const [anthropic, setAnthropic] = useState("");
+  const [deepseek, setDeepseek] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const refresh = () => {
+    void desktop.providerKeyStatus().then((rows) => {
+      setStatus(new Map(rows.map((row) => [row.providerId, row.source])));
+    });
+  };
+  useEffect(refresh, []);
+
+  const saveKey = async (providerId: string, key: string, clear: () => void) => {
+    if (!key.trim()) return;
+    setBusy(true);
+    try {
+      await desktop.saveProviderKey(providerId, key);
+      clear();
+      setMessage("Key saved to Windows Credential Manager.");
+      refresh();
+    } catch {
+      setMessage("The key could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeKey = async (providerId: string) => {
+    setBusy(true);
+    try {
+      await desktop.deleteProviderKey(providerId);
+      setMessage("Key removed.");
+      refresh();
+    } catch {
+      setMessage("The key could not be removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sourceLabel = (source: ProviderKeySource | undefined) =>
+    source === "environment"
+      ? "From environment"
+      : source === "credential_manager"
+        ? "Saved on this device"
+        : "Not set";
+
+  return (
+    <fieldset disabled={busy} className="credentials">
+      <legend>Provider credentials</legend>
+      <p className="credential-intro">
+        Keys are stored in Windows Credential Manager and never shown again.
+      </p>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>Anthropic / Claude</strong>
+          <span>
+            Admin key (sk-ant-admin) for usage and cost reports ·{" "}
+            {sourceLabel(status.get("anthropic-claude"))}
+          </span>
+        </div>
+        <input
+          type="password"
+          value={anthropic}
+          placeholder="sk-ant-admin-…"
+          onChange={(event) => setAnthropic(event.target.value)}
+          aria-label="Anthropic API key"
+        />
+        <button
+          aria-label="Save Anthropic API key"
+          onClick={() =>
+            void saveKey("anthropic-claude", anthropic, () => setAnthropic(""))
+          }
+        >
+          Save
+        </button>
+        {status.get("anthropic-claude") === "credential_manager" && (
+          <button onClick={() => void removeKey("anthropic-claude")}>
+            Remove
+          </button>
+        )}
+      </div>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>DeepSeek</strong>
+          <span>
+            API key from platform.deepseek.com · {sourceLabel(status.get("deepseek"))}
+          </span>
+        </div>
+        <input
+          type="password"
+          value={deepseek}
+          placeholder="sk-…"
+          onChange={(event) => setDeepseek(event.target.value)}
+          aria-label="DeepSeek API key"
+        />
+        <button
+          aria-label="Save DeepSeek API key"
+          onClick={() => void saveKey("deepseek", deepseek, () => setDeepseek(""))}
+        >
+          Save
+        </button>
+        {status.get("deepseek") === "credential_manager" && (
+          <button onClick={() => void removeKey("deepseek")}>Remove</button>
+        )}
+      </div>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>OpenAI / Codex</strong>
+          <span>Uses your `codex login` session; Ellie reuses it directly.</span>
+        </div>
+      </div>
+      <p className="credential-message" role="status">
+        {message}
+      </p>
+    </fieldset>
   );
 }
 
@@ -348,7 +519,7 @@ function usageDescription(
     return "Provider connections are not available in this build.";
   }
   if (visible.length === 0) {
-    return "Nothing active right now — hidden providers return when you subscribe or configure them.";
+    return "No visible providers. Check Provider visibility in Settings; unconfigured or unsubscribed providers also stay hidden.";
   }
   return hasLiveData(visible)
     ? "Cards show live quota from your configured logins; demo cards stay labeled."
@@ -360,7 +531,7 @@ function usageNote(providers: ProviderOverview[], visible: ProviderOverview[]) {
     return "No provider requests.";
   }
   if (visible.length === 0) {
-    return "Inactive providers are hidden until you subscribe or configure them.";
+    return "Show hidden cards in Settings → Provider visibility. No credentials or history are deleted.";
   }
   return hasLiveData(visible)
     ? "Live data comes from your codex CLI login on this machine; no token is stored."
@@ -382,17 +553,29 @@ function ProviderUnavailable() {
   );
 }
 
-function ProviderCard({ provider }: { provider: ProviderOverview }) {
+function ProviderCard({ provider, onHide, hideDisabled }: {
+  provider: ProviderOverview;
+  onHide: () => void;
+  hideDisabled: boolean;
+}) {
+  const hideButton = (
+    <button type="button" className="provider-hide" disabled={hideDisabled}
+      aria-label={`Hide ${provider.displayName}`} onClick={onHide}>
+      Hide
+    </button>
+  );
   if (!provider.snapshot) {
     return (
       <article className="provider">
         <div className="provider-name">
-          <h3>Provider unavailable</h3>
+          <h3>{provider.displayName}</h3>
+          <p>Provider unavailable</p>
           <p>Ellie kept other provider results available.</p>
         </div>
         <span className="unavailable">
           {provider.error?.replaceAll("_", " ")}
         </span>
+        {hideButton}
       </article>
     );
   }
@@ -405,9 +588,8 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
         </span>
         <div className="provider-name">
           <h3>{snapshot.displayName}</h3>
-          <p>
-            {snapshot.accountLabel} · {snapshot.plan}
-          </p>
+          {headerDetail(snapshot) && <p>{headerDetail(snapshot)}</p>}
+          {snapshot.model && <p className="provider-model">Model: {snapshot.model}</p>}
         </div>
         {snapshot.dataKind === "mock" && (
           <span className="mock-badge">Mock data</span>
@@ -421,17 +603,64 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
             dataKind={snapshot.dataKind}
           />
         ))}
-      {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
-        <div className="token-summary">
-          <span>Sample token activity</span>
-          <span>
-            {formatCount(snapshot.tokenUsage.totalTokens)} tokens ·{" "}
-            {formatCount(snapshot.tokenUsage.requestCount)} requests
-          </span>
-          <small>Locally calculated sample · illustrative only</small>
+      {snapshot.balance !== null && (
+        <div className="balance-summary">
+          <span>Account balance</span>
+          <span>{formatBalance(snapshot.balance, snapshot.balanceCurrency)}</span>
+          {snapshot.spendEstimate && (
+            <>
+              <span>≈ spent (last {snapshot.spendEstimate.windowDays} days)</span>
+              <span>
+                {formatBalance(
+                  snapshot.spendEstimate.amount,
+                  snapshot.spendEstimate.currency,
+                )}
+              </span>
+              <small>
+                Estimated by Ellie from reported balance changes; top-ups can
+                skew it
+              </small>
+            </>
+          )}
         </div>
       )}
+      {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
+        <TokenSummaryCard snapshot={snapshot} />
+      )}
+      {hideButton}
     </article>
+  );
+}
+
+function TokenSummaryCard({ snapshot }: { snapshot: UsageSnapshot }) {
+  const tokens = snapshot.tokenUsage!;
+  const mock = snapshot.dataKind === "mock";
+  const windowLabel = mock
+    ? "Sample token activity"
+    : "Token activity (last 30 days)";
+  const breaksDown =
+    tokens.inputTokens !== undefined && tokens.outputTokens !== undefined;
+  return (
+    <div className="token-summary">
+      <span>{windowLabel}</span>
+      <span>
+        {formatCount(tokens.totalTokens)} tokens ·{" "}
+        {breaksDown
+          ? `${formatCount(tokens.inputTokens)} in / ${formatCount(tokens.outputTokens)} out`
+          : `${formatCount(tokens.requestCount)} requests`}
+      </span>
+      <small>
+        {tokens.estimatedCostUsd !== null &&
+          `${formatBalance(tokens.estimatedCostUsd, "USD")} · `}
+        {tokens.cachedInputTokens !== undefined &&
+          `${formatCount(tokens.cachedInputTokens)} cached input · `}
+        {mock
+          ? "Locally calculated sample · illustrative only"
+          : tokens.source === "locally_calculated"
+            ? "Locally calculated by Ellie (window chosen and summed from provider buckets)"
+            : "Provider-reported"}
+      </small>
+    </div>
   );
 }
 
@@ -485,8 +714,23 @@ function UsageWindowCard({
   );
 }
 
-function formatCount(value: number | null) {
-  return value === null ? "—" : new Intl.NumberFormat().format(value);
+function formatCount(value: number | null | undefined) {
+  return value == null ? "—" : new Intl.NumberFormat().format(value);
+}
+function headerDetail(snapshot: UsageSnapshot) {
+  return [snapshot.accountLabel, snapshot.plan].filter(Boolean).join(" · ");
+}
+function formatBalance(value: number, currency: string | null) {
+  const amount = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (!currency) return amount;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(value);
+  } catch {
+    return `${currency} ${amount}`;
+  }
 }
 function formatReset(
   value: string | null,

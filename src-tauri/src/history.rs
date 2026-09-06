@@ -6,14 +6,18 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::{
     error::AppError,
     providers::{
-        AuthState, DataKind, MetricSource, ProviderCapabilities, TokenUsage, UsageSnapshot,
-        UsageWindow,
+        AuthState, DataKind, MetricSource, ProviderCapabilities, SpendEstimate, TokenUsage,
+        UsageSnapshot, UsageWindow,
     },
     storage,
 };
 
 /// Default history retention window from the specification.
 pub const HISTORY_RETENTION: Duration = Duration::from_secs(90 * 24 * 60 * 60);
+/// Window used for balance-derived spend estimates.
+pub const SPEND_ESTIMATE_WINDOW: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// Upper bound on balance snapshots examined for one spend estimate.
+pub const SPEND_ESTIMATE_MAX_SNAPSHOTS: u64 = 1_000;
 /// How often expired history is removed while the app runs.
 pub const HISTORY_CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Upper bound for one retention cleanup pass.
@@ -33,8 +37,9 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
     transaction.execute(
         "INSERT INTO usage_snapshots
              (provider_id, account_id, fetched_at, data_kind, auth_state,
-              capabilities_json, credits, balance, has_subscription)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              capabilities_json, credits, balance, has_subscription, balance_currency,
+              spend_estimate_amount, spend_estimate_currency, spend_estimate_window_days, model)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             provider_id,
             account_id,
@@ -45,6 +50,20 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
             snapshot.credits,
             snapshot.balance,
             snapshot.has_subscription.map(|value| value as i64),
+            snapshot.balance_currency,
+            snapshot
+                .spend_estimate
+                .as_ref()
+                .map(|estimate| estimate.amount),
+            snapshot
+                .spend_estimate
+                .as_ref()
+                .map(|estimate| estimate.currency.clone()),
+            snapshot
+                .spend_estimate
+                .as_ref()
+                .map(|estimate| estimate.window_days),
+            snapshot.model,
         ],
     )?;
     let snapshot_id = transaction.last_insert_rowid();
@@ -164,6 +183,67 @@ pub fn cleanup_history(path: &Path, retention: Duration) -> Result<usize, AppErr
     )?)
 }
 
+/// Locally-calculated spend estimate for a balance-based provider: the
+/// positive balance decrease between the oldest stored snapshot inside
+/// `window` (with a matching currency) and the current balance. Returns
+/// `None` when no suitable prior snapshot exists (fewer than two data
+/// points), the currencies differ, or the balance did not decrease
+/// (top-ups/grants). `window_days` reflects the actual span covered.
+pub fn spend_estimate(
+    path: &Path,
+    provider_key: &str,
+    current_balance: f64,
+    currency: &str,
+    window: Duration,
+) -> Result<Option<SpendEstimate>, AppError> {
+    let connection = storage::connect(path)?;
+    let cutoff = Utc::now() - window;
+    // An estimate needs at least two prior observations to establish a trend;
+    // a single point is likely the initial top-up, not spend.
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM usage_snapshots s
+         JOIN providers p ON p.id = s.provider_id
+         WHERE p.provider_key = ?1 AND s.balance IS NOT NULL
+           AND s.balance_currency = ?2 AND s.fetched_at >= ?3",
+        params![provider_key, currency, timestamp(cutoff)],
+        |row| row.get(0),
+    )?;
+    if count < 2 {
+        return Ok(None);
+    }
+    let earliest: Option<(String, f64)> = connection
+        .query_row(
+            "SELECT s.fetched_at, s.balance
+             FROM usage_snapshots s
+             JOIN providers p ON p.id = s.provider_id
+             WHERE p.provider_key = ?1
+               AND s.balance IS NOT NULL
+               AND s.balance_currency = ?2
+               AND s.fetched_at >= ?3
+             ORDER BY s.fetched_at ASC
+             LIMIT 1",
+            params![provider_key, currency, timestamp(cutoff)],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((fetched_at, previous_balance)) = earliest else {
+        return Ok(None);
+    };
+    let Some(previous_at) = parse_timestamp(&fetched_at) else {
+        return Ok(None);
+    };
+    let spent = previous_balance - current_balance;
+    if spent <= 0.0 || !spent.is_finite() {
+        return Ok(None);
+    }
+    let window_days = (Utc::now() - previous_at).num_days().clamp(1, i64::MAX);
+    Ok(Some(SpendEstimate {
+        amount: spent,
+        currency: currency.to_string(),
+        window_days,
+    }))
+}
+
 fn upsert_provider(connection: &Connection, snapshot: &UsageSnapshot) -> Result<i64, AppError> {
     connection.execute(
         "INSERT INTO providers (provider_key, display_name)
@@ -254,12 +334,18 @@ struct RawSnapshot {
     credits: Option<f64>,
     balance: Option<f64>,
     has_subscription: Option<bool>,
+    balance_currency: Option<String>,
+    spend_estimate_amount: Option<f64>,
+    spend_estimate_currency: Option<String>,
+    spend_estimate_window_days: Option<i64>,
+    model: Option<String>,
 }
 
 fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnapshot, AppError> {
     let raw: RawSnapshot = connection.query_row(
         "SELECT provider_id, account_id, fetched_at, data_kind, auth_state,
-                capabilities_json, credits, balance, has_subscription
+                capabilities_json, credits, balance, has_subscription, balance_currency,
+                spend_estimate_amount, spend_estimate_currency, spend_estimate_window_days, model
          FROM usage_snapshots WHERE id = ?1",
         params![snapshot_id],
         |row| {
@@ -275,6 +361,11 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
                 has_subscription: row
                     .get(8)
                     .map(|value: Option<i64>| value.map(|value| value != 0))?,
+                balance_currency: row.get(9)?,
+                spend_estimate_amount: row.get(10)?,
+                spend_estimate_currency: row.get(11)?,
+                spend_estimate_window_days: row.get(12)?,
+                model: row.get(13)?,
             })
         },
     )?;
@@ -312,6 +403,17 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
         windows,
         credits: raw.credits,
         balance: raw.balance,
+        balance_currency: raw.balance_currency,
+        spend_estimate: raw.spend_estimate_amount.and_then(|amount| {
+            let currency = raw.spend_estimate_currency?;
+            let window_days = raw.spend_estimate_window_days?;
+            Some(SpendEstimate {
+                amount,
+                currency,
+                window_days,
+            })
+        }),
+        model: raw.model,
         token_usage,
         fetched_at: parse_timestamp(&raw.fetched_at).ok_or(AppError::Storage)?,
     })
@@ -509,6 +611,9 @@ mod tests {
             }],
             credits: None,
             balance: Some(12.5),
+            balance_currency: Some("USD".into()),
+            spend_estimate: None,
+            model: Some("alpha-model".into()),
             token_usage: Some(TokenUsage {
                 input_tokens: Some(1_000),
                 output_tokens: Some(500),
@@ -678,6 +783,52 @@ mod tests {
                 .has_subscription,
             Some(false)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn spend_estimate_derives_positive_balance_decrease() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        initialize(&path);
+        let now = Utc::now();
+        let ten_days_ago = truncate_millis(now - ChronoDuration::days(10));
+        let yesterday = truncate_millis(now - ChronoDuration::days(1));
+        let mut earlier = sample_snapshot("alpha", "Alpha", ten_days_ago);
+        earlier.balance = Some(110.0);
+        let mut later = sample_snapshot("alpha", "Alpha", yesterday);
+        later.balance = Some(90.0);
+        insert_snapshot(&path, &earlier)?;
+        insert_snapshot(&path, &later)?;
+
+        let estimate = spend_estimate(&path, "alpha", 90.0, "USD", SPEND_ESTIMATE_WINDOW)?
+            .expect("estimate computed");
+        assert!((estimate.amount - 20.0).abs() < 1e-9);
+        assert_eq!(estimate.currency, "USD");
+        assert!(
+            (8..=10).contains(&estimate.window_days),
+            "actual span reported"
+        );
+
+        // Balance went up (top-up): no estimate.
+        assert!(spend_estimate(&path, "alpha", 120.0, "USD", SPEND_ESTIMATE_WINDOW)?.is_none());
+        // Currency mismatch: no estimate.
+        assert!(spend_estimate(&path, "alpha", 90.0, "CNY", SPEND_ESTIMATE_WINDOW)?.is_none());
+        // No prior snapshot for an unknown provider.
+        assert!(spend_estimate(&path, "missing", 90.0, "USD", SPEND_ESTIMATE_WINDOW)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn spend_estimate_requires_two_balance_points() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        initialize(&path);
+        let mut single = sample_snapshot("alpha", "Alpha", truncate_millis(Utc::now()));
+        single.balance = Some(50.0);
+        insert_snapshot(&path, &single)?;
+        assert!(spend_estimate(&path, "alpha", 40.0, "USD", SPEND_ESTIMATE_WINDOW)?.is_none());
         Ok(())
     }
 

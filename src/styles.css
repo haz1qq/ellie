@@ -349,6 +349,21 @@ legend {
   padding-top: 20px;
   border-top: 1px solid var(--border);
 }
+fieldset.credentials,
+fieldset.provider-visibility {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.provider-hide {
+  align-self: flex-start;
+  margin-top: 12px;
+}
+.provider-visibility > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .settings-note h2 {
   font-size: 13px;
   margin-bottom: 7px;
@@ -488,4 +503,69 @@ legend {
 }
 .token-summary small {
   grid-column: 1/-1;
+}
+.provider-model {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 1px;
+}
+.credential-intro {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+.credential-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(180px, 220px) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.credential-info {
+  display: grid;
+  gap: 2px;
+}
+.credential-info span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.credential-row input {
+  background: #202024;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font-size: 12px;
+}
+.credential-row input::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+.credential-message {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.balance-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.balance-summary span:first-child {
+  color: var(--muted);
+}
+.balance-summary span:last-child {
+  color: var(--pink);
+  font-weight: 600;
+}
+.balance-summary small {
+  grid-column: 1/-1;
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
 }

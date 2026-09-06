@@ -64,6 +64,8 @@ struct RateLimitSnapshot {
     limit_id: Option<String>,
     #[allow(dead_code)]
     limit_name: Option<String>,
+    #[allow(dead_code)]
+    normal_model_slug: Option<String>,
     plan_type: Option<String>,
     primary: Option<RateLimitWindow>,
     secondary: Option<RateLimitWindow>,
@@ -338,6 +340,9 @@ fn snapshot_from_response(
         windows,
         credits,
         balance: None,
+        balance_currency: None,
+        spend_estimate: None,
+        model: response.rate_limits.normal_model_slug.clone(),
         token_usage: None,
         fetched_at,
     })

@@ -23,6 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]

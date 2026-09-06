@@ -1,4 +1,5 @@
 mod commands;
+pub mod credentials;
 pub mod error;
 pub mod history;
 pub mod providers;
@@ -43,6 +44,7 @@ pub fn run() -> Result<(), AppError> {
                     let mut registry = providers::ProviderRegistry::default();
                     registry.register(Arc::new(providers::OpenAiProvider));
                     registry.register(Arc::new(providers::AnthropicProvider));
+                    registry.register(Arc::new(providers::DeepSeekProvider));
                     registry.register(Arc::new(providers::MockProvider));
                     registry
                 },
@@ -55,7 +57,10 @@ pub fn run() -> Result<(), AppError> {
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
             commands::save_settings,
-            commands::hide_to_tray
+            commands::hide_to_tray,
+            commands::save_provider_key,
+            commands::delete_provider_key,
+            commands::provider_key_status
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

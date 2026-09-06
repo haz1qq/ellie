@@ -11,11 +11,16 @@ vi.mock("./lib/desktop", () => ({
     saveSettings: vi.fn(),
     hide: vi.fn(),
     onNavigate: vi.fn(),
+    saveProviderKey: vi.fn(),
+    deleteProviderKey: vi.fn(),
+    providerKeyStatus: vi.fn(),
   },
 }));
-const initial = { closeToTray: true, showMascot: true, friendlyMessages: true };
+const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, hiddenProviderIds: [] as string[] };
 const demoProviders: ProviderOverview[] = [
   {
+    providerId: "ellie-demo",
+    displayName: "Ellie Demo",
     snapshot: {
       providerId: "ellie-demo",
       displayName: "Ellie Demo",
@@ -48,6 +53,10 @@ const demoProviders: ProviderOverview[] = [
         estimatedCostUsd: 0.42,
         source: "locally_calculated",
       },
+      balance: null,
+      balanceCurrency: null,
+      spendEstimate: null,
+      model: null,
       fetchedAt: "2026-09-06T08:00:00Z",
     },
     error: null,
@@ -56,6 +65,8 @@ const demoProviders: ProviderOverview[] = [
 
 const liveProviders: ProviderOverview[] = [
   {
+    providerId: "openai-codex",
+    displayName: "OpenAI / Codex",
     snapshot: {
       providerId: "openai-codex",
       displayName: "OpenAI / Codex",
@@ -91,6 +102,10 @@ const liveProviders: ProviderOverview[] = [
         },
       ],
       tokenUsage: null,
+      balance: null,
+      balanceCurrency: null,
+      spendEstimate: null,
+      model: null,
       fetchedAt: "2026-09-06T14:00:00Z",
     },
     error: null,
@@ -98,7 +113,10 @@ const liveProviders: ProviderOverview[] = [
 ];
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(desktop.saveSettings).mockImplementation(async (settings) => settings);
   vi.mocked(desktop.available).mockReturnValue(true);
+  vi.mocked(desktop.providerKeyStatus).mockResolvedValue([]);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
@@ -203,6 +221,8 @@ describe("bootstrap shell", () => {
   it("hides explicitly unsubscribed providers and brings them back on resubscribe", async () => {
     const unsubscribed: ProviderOverview[] = [
       {
+        providerId: "openai-codex",
+        displayName: "OpenAI / Codex",
         snapshot: {
           providerId: "openai-codex",
           displayName: "OpenAI / Codex",
@@ -230,6 +250,10 @@ describe("bootstrap shell", () => {
             },
           ],
           tokenUsage: null,
+          balance: null,
+          balanceCurrency: null,
+          spendEstimate: null,
+          model: null,
           fetchedAt: "2026-09-06T14:00:00Z",
         },
         error: null,
@@ -273,10 +297,14 @@ describe("bootstrap shell", () => {
   it("hides unconfigured providers but keeps transient errors visible", async () => {
     const mixed: ProviderOverview[] = [
       {
+        providerId: "anthropic-claude",
+        displayName: "Anthropic / Claude",
         snapshot: null,
         error: "authentication_required", // no ANTHROPIC_API_KEY
       },
       {
+        providerId: "openai-codex",
+        displayName: "OpenAI / Codex",
         snapshot: null,
         error: "unavailable", // transient codex failure stays visible
       },
@@ -298,6 +326,232 @@ describe("bootstrap shell", () => {
     expect(screen.getByText("unavailable")).toBeVisible();
     expect(screen.queryByText("authentication_required")).not.toBeInTheDocument();
     expect(screen.getByText("Ellie Demo")).toBeVisible();
+  });
+
+  it("renders provider-reported account balance with its currency", async () => {
+    const deepseek: ProviderOverview[] = [
+      {
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        snapshot: {
+          providerId: "deepseek",
+          displayName: "DeepSeek",
+          accountLabel: null,
+          plan: null,
+          capabilities: {
+            quotaWindows: false,
+            tokenUsage: false,
+            accountBalance: true,
+            credits: false,
+            costTracking: false,
+            localHistory: false,
+          },
+          authState: "authenticated",
+          hasSubscription: null,
+          dataKind: "live",
+          windows: [],
+          tokenUsage: null,
+          balance: 110,
+          balanceCurrency: "CNY",
+          spendEstimate: null,
+          model: null,
+          fetchedAt: "2026-09-06T14:00:00Z",
+        },
+        error: null,
+      },
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: deepseek,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("DeepSeek")).toBeVisible();
+    expect(screen.getByText("Account balance")).toBeVisible();
+    expect(screen.getByText(/110/)).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+  });
+
+  it("renders live token breakdown, model, and spend estimate for balance providers", async () => {
+    const anthropic: ProviderOverview[] = [
+      {
+        providerId: "anthropic-claude",
+        displayName: "Anthropic / Claude",
+        snapshot: {
+          providerId: "anthropic-claude",
+          displayName: "Anthropic / Claude",
+          accountLabel: null,
+          plan: null,
+          capabilities: {
+            quotaWindows: false,
+            tokenUsage: true,
+            accountBalance: false,
+            credits: false,
+            costTracking: true,
+            localHistory: false,
+          },
+          authState: "authenticated",
+          hasSubscription: null,
+          dataKind: "live",
+          windows: [],
+          tokenUsage: {
+            totalTokens: 8000,
+            inputTokens: 7200,
+            outputTokens: 800,
+            cachedInputTokens: 1700,
+            requestCount: null,
+            estimatedCostUsd: 2.0,
+            source: "locally_calculated",
+          },
+          balance: 100,
+          balanceCurrency: "USD",
+          spendEstimate: {
+            amount: 20,
+            currency: "USD",
+            windowDays: 10,
+          },
+          model: "claude-opus-5",
+          fetchedAt: "2026-09-06T14:00:00Z",
+        },
+        error: null,
+      },
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: anthropic,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Model: claude-opus-5")).toBeVisible();
+    expect(screen.getByText(/7,200 in \/ 800 out/)).toBeVisible();
+    expect(screen.getByText(/1,700 cached input/)).toBeVisible();
+    expect(screen.getByText("Token activity (last 30 days)")).toBeVisible();
+    expect(screen.getByText(/≈ spent \(last 10 days\)/)).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+  });
+
+  it("saves and reports provider API keys in settings without echoing them", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([
+      { providerId: "anthropic-claude", source: "none" },
+      { providerId: "deepseek", source: "credential_manager" },
+    ]);
+    vi.mocked(desktop.saveProviderKey).mockResolvedValue(undefined);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(
+      screen.getByLabelText("DeepSeek API key"),
+      "sk-test-secret",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save DeepSeek API key" }),
+    );
+    await waitFor(() =>
+      expect(desktop.saveProviderKey).toHaveBeenCalledWith(
+        "deepseek",
+        "sk-test-secret",
+      ),
+    );
+    expect(screen.queryByText("sk-test-secret")).not.toBeInTheDocument();
+    expect(screen.getByText(/Saved on this device/)).toBeVisible();
+  });
+
+  it("hides the demo only after saving and restores it from Settings", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial, view: "dashboard", providers: [...demoProviders, ...liveProviders],
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Hide Ellie Demo" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "OpenAI / Codex" })).toBeVisible();
+    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, hiddenProviderIds: ["ellie-demo"] });
+    expect(screen.getByText("1 shown · 1 hidden")).toBeVisible();
+    expect(desktop.bootstrap).toHaveBeenCalledTimes(1);
+    expect(desktop.deleteProviderKey).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    const toggle = screen.getByRole("checkbox", { name: /Show Ellie Demo on dashboard/ });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(desktop.saveSettings).toHaveBeenLastCalledWith(initial);
+    await user.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
+  });
+
+  it("loads persisted hidden cards and can hide a failed provider by its registry identity", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: { ...initial, hiddenProviderIds: ["ellie-demo"] }, view: "dashboard",
+      providers: [...demoProviders, { providerId: "deepseek", displayName: "DeepSeek", snapshot: null, error: "unavailable" }],
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Hide DeepSeek" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "DeepSeek" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument();
+    expect(screen.getByText("0 shown · 2 hidden")).toBeVisible();
+    expect(screen.getByText(/No visible providers/)).toBeVisible();
+    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, hiddenProviderIds: ["ellie-demo", "deepseek"] });
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("checkbox", { name: /Show Ellie Demo/ })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Show DeepSeek/ })).not.toBeChecked();
+  });
+
+  it("keeps the card on save failure and disables hide while saving", async () => {
+    const user = userEvent.setup();
+    let rejectSave!: (error: Error) => void;
+    vi.mocked(desktop.saveSettings).mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
+    render(<App />);
+    const hide = await screen.findByRole("button", { name: "Hide Ellie Demo" });
+    await user.click(hide);
+    expect(hide).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
+    rejectSave(new Error("sensitive storage failure"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider visibility was not saved");
+    expect(screen.queryByText("sensitive storage failure")).not.toBeInTheDocument();
+    expect(hide).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
+  });
+
+  it("preserves unsaved appearance edits when restoring a provider", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: { ...initial, hiddenProviderIds: ["ellie-demo"] }, view: "settings", providers: demoProviders,
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("checkbox", { name: /Friendly messages/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Show Ellie Demo/ }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Show Ellie Demo/ })).toBeChecked());
+    expect(desktop.saveSettings).toHaveBeenLastCalledWith(initial);
+    expect(screen.getByRole("checkbox", { name: /Friendly messages/ })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, friendlyMessages: false });
+  });
+
+  it("keeps failed restores hidden and preserves automatic authentication hiding", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: { ...initial, hiddenProviderIds: ["ellie-demo", "deepseek"] }, view: "settings",
+      providers: [...demoProviders, { providerId: "deepseek", displayName: "DeepSeek", snapshot: null, error: "authentication_required" }],
+    });
+    vi.mocked(desktop.saveSettings).mockRejectedValueOnce(new Error("secret"));
+    render(<App />);
+    const demo = await screen.findByRole("checkbox", { name: /Show Ellie Demo/ });
+    await user.click(demo);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider visibility was not saved");
+    expect(demo).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: /Show DeepSeek/ }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Show DeepSeek/ })).toBeChecked());
+    await user.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.queryByRole("heading", { name: "DeepSeek" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument();
   });
 
   it("offers retry when settings cannot be loaded", async () => {

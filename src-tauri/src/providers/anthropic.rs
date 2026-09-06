@@ -11,9 +11,6 @@ use super::{
 
 const PROVIDER_ID: &str = "anthropic-claude";
 const DISPLAY_NAME: &str = "Anthropic / Claude";
-/// Admin API key (starts with `sk-ant-admin`) used for the Usage and Cost
-/// reports. Read from the environment only; never logged or stored by Ellie.
-const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 const API_BASE_URL: &str = "https://api.anthropic.com";
 const API_VERSION: &str = "2023-06-01";
 /// Report window: the trailing 30 days, one bucket per day.
@@ -51,16 +48,23 @@ impl UsageProvider for AnthropicProvider {
     }
 
     async fn detect(&self) -> Result<DetectionResult, ProviderError> {
-        Ok(detect_state())
+        Ok(detect_state().await)
     }
 
     async fn authenticate(&self) -> Result<AuthState, ProviderError> {
-        // Key entry UI and OAuth flows are deferred; report the detected state.
-        Ok(detect_state().auth_state)
+        // Key entry happens through the Settings UI; report the detected state.
+        Ok(detect_state().await.auth_state)
     }
 
     async fn fetch_usage(&self) -> Result<UsageSnapshot, ProviderError> {
-        let key = std::env::var(API_KEY_ENV).map_err(|_| ProviderError::AuthenticationRequired)?;
+        let store = crate::credentials::WindowsCredentialStore;
+        let key = tokio::task::spawn_blocking(move || {
+            crate::credentials::provider_key(&store, PROVIDER_ID)
+        })
+        .await
+        .map_err(|_| ProviderError::Unavailable)?
+        .map_err(|_| ProviderError::Unavailable)?
+        .ok_or(ProviderError::AuthenticationRequired)?;
         let api = AnthropicApi::with_key(API_BASE_URL.to_string(), key);
         let snapshot = anthropic_api_fetch(api).await?;
         Ok(snapshot)
@@ -107,6 +111,7 @@ async fn anthropic_api_fetch(api: AnthropicApi) -> Result<UsageSnapshot, Provide
     let cached_input_tokens = usage.iter().map(|row| row.cached_input).sum::<u64>();
     let total_tokens = input_tokens + output_tokens;
     let estimated_cost_usd = cost.iter().map(|point| point.amount_usd).sum::<f64>();
+    let model = dominant_model(&usage);
 
     Ok(UsageSnapshot {
         provider_id: PROVIDER_ID.to_string(),
@@ -127,6 +132,9 @@ async fn anthropic_api_fetch(api: AnthropicApi) -> Result<UsageSnapshot, Provide
         windows: Vec::new(),
         credits: None,
         balance: None,
+        balance_currency: None,
+        spend_estimate: None,
+        model,
         token_usage: Some(TokenUsage {
             input_tokens: Some(input_tokens),
             output_tokens: Some(output_tokens),
@@ -147,11 +155,27 @@ struct UsageRow {
     input: u64,
     output: u64,
     cached_input: u64,
+    model: Option<String>,
 }
 
 #[derive(Default)]
 struct CostPoint {
     amount_usd: f64,
+}
+
+/// The model with the most tokens in the report window, when any model is
+/// named. `None` when the source does not identify models — never invented.
+fn dominant_model(rows: &[UsageRow]) -> Option<String> {
+    let mut totals: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+    for row in rows {
+        if let Some(model) = row.model.as_deref() {
+            *totals.entry(model).or_default() += row.input + row.output;
+        }
+    }
+    totals
+        .into_iter()
+        .max_by_key(|(_, total)| *total)
+        .map(|(model, _)| model.to_string())
 }
 
 fn parse_usage_rows(data: &[Value]) -> Result<Vec<UsageRow>, ProviderError> {
@@ -179,6 +203,10 @@ fn parse_usage_row(result: &Value) -> Result<UsageRow, ProviderError> {
         input: uncached + cache_read + cache_creation,
         output,
         cached_input: cache_read + cache_creation,
+        model: result
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     })
 }
 
@@ -235,29 +263,32 @@ fn cost_amount(result: &Value) -> Result<f64, ProviderError> {
     }
 }
 
-fn api_key_configured() -> bool {
-    std::env::var(API_KEY_ENV).is_ok()
-}
-
-fn detect_state() -> DetectionResult {
-    if api_key_configured() {
-        DetectionResult {
+async fn detect_state() -> DetectionResult {
+    let store = crate::credentials::WindowsCredentialStore;
+    let source = tokio::task::spawn_blocking(move || {
+        crate::credentials::provider_key_status(&store, PROVIDER_ID).ok()
+    })
+    .await
+    .unwrap_or(None)
+    .unwrap_or(crate::credentials::KeySource::None);
+    match source {
+        crate::credentials::KeySource::Environment
+        | crate::credentials::KeySource::CredentialManager => DetectionResult {
             auth_state: AuthState::AuthenticationDetected,
             detail: Some(
-                "Anthropic admin API key found in the environment; usage and cost reports \
-                 are read through the Admin API."
+                "Anthropic admin API key found (environment or Windows Credential Manager); \
+                     usage and cost reports are read through the Admin API."
                     .to_string(),
             ),
-        }
-    } else {
-        DetectionResult {
+        },
+        crate::credentials::KeySource::None => DetectionResult {
             auth_state: AuthState::AuthenticationRequired,
             detail: Some(
-                "Set ANTHROPIC_API_KEY to an Anthropic admin key (sk-ant-admin) scoped for \
-                 the usage and cost reports."
+                "Add an Anthropic admin key (sk-ant-admin) scoped for the usage and cost reports \
+                 in Settings → Provider credentials."
                     .to_string(),
             ),
-        }
+        },
     }
 }
 
@@ -484,13 +515,13 @@ mod tests {
         assert_eq!(classify_status(500), ProviderError::Unavailable);
     }
 
-    #[test]
-    fn detect_reports_missing_key() {
-        let previous = std::env::var(API_KEY_ENV).ok();
-        std::env::remove_var(API_KEY_ENV);
-        let state = detect_state();
+    #[tokio::test]
+    async fn detect_reports_missing_key() {
+        let previous = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let state = detect_state().await;
         if let Some(key) = previous {
-            std::env::set_var(API_KEY_ENV, key);
+            std::env::set_var("ANTHROPIC_API_KEY", key);
         }
         assert_eq!(state.auth_state, AuthState::AuthenticationRequired);
     }

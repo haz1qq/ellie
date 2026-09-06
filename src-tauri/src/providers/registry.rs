@@ -23,10 +23,14 @@ impl ProviderRegistry {
         for provider in self.providers.values() {
             let overview = match provider.fetch_usage().await {
                 Ok(snapshot) => ProviderOverview {
+                    provider_id: provider.id().to_owned(),
+                    display_name: provider.display_name().to_owned(),
                     snapshot: Some(snapshot),
                     error: None,
                 },
                 Err(error) => ProviderOverview {
+                    provider_id: provider.id().to_owned(),
+                    display_name: provider.display_name().to_owned(),
                     snapshot: None,
                     error: Some(error),
                 },
@@ -40,10 +44,14 @@ impl ProviderRegistry {
         let provider = self.providers.get(id).ok_or(ProviderError::Unavailable)?;
         Ok(match provider.fetch_usage().await {
             Ok(snapshot) => ProviderOverview {
+                provider_id: provider.id().to_owned(),
+                display_name: provider.display_name().to_owned(),
                 snapshot: Some(snapshot),
                 error: None,
             },
             Err(error) => ProviderOverview {
+                provider_id: provider.id().to_owned(),
+                display_name: provider.display_name().to_owned(),
                 snapshot: None,
                 error: Some(error),
             },
@@ -89,8 +97,16 @@ mod tests {
         let results = registry.refresh_all().await;
         assert_eq!(results.len(), 2);
         assert!(results.iter().any(|result| result.snapshot.is_some()));
-        assert!(results
+        let failed = results
             .iter()
-            .any(|result| result.error == Some(ProviderError::Unavailable)));
+            .find(|result| result.provider_id == "failing")
+            .expect("failed provider identity");
+        assert_eq!(failed.display_name, "Failing");
+        assert_eq!(failed.error, Some(ProviderError::Unavailable));
+        let single = registry
+            .refresh_one("failing")
+            .await
+            .expect("registered provider");
+        assert_eq!(*failed, single);
     }
 }
