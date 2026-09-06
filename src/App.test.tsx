@@ -248,7 +248,7 @@ describe("bootstrap shell", () => {
     // The unsubscribed card is hidden; the demo card stays.
     expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
     expect(screen.getByText("Ellie Demo")).toBeVisible();
-    expect(screen.getByText("1 shown · 1 unsubscribed")).toBeVisible();
+    expect(screen.getByText("1 shown · 1 hidden")).toBeVisible();
     expect(screen.getByText(/Demo providers exercise Ellie's display/)).toBeVisible();
 
     // Resubscribing flips the flag on the next refresh and the card returns.
@@ -268,6 +268,36 @@ describe("bootstrap shell", () => {
     first.unmount();
     render(<App />);
     await waitFor(() => expect(screen.getByText("OpenAI / Codex")).toBeVisible());
+  });
+
+  it("hides unconfigured providers but keeps transient errors visible", async () => {
+    const mixed: ProviderOverview[] = [
+      {
+        snapshot: null,
+        error: "authentication_required", // no ANTHROPIC_API_KEY
+      },
+      {
+        snapshot: null,
+        error: "unavailable", // transient codex failure stays visible
+      },
+      ...demoProviders,
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: mixed,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("2 shown · 1 hidden")).toBeVisible();
+    // Only the transient error card renders; the unconfigured one is hidden.
+    const unavailableCards = screen.getAllByText("Provider unavailable");
+    expect(unavailableCards).toHaveLength(1);
+    expect(screen.getByText("unavailable")).toBeVisible();
+    expect(screen.queryByText("authentication_required")).not.toBeInTheDocument();
+    expect(screen.getByText("Ellie Demo")).toBeVisible();
   });
 
   it("offers retry when settings cannot be loaded", async () => {
