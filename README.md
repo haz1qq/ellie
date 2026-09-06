@@ -22,7 +22,14 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
 - Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
 - OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, resets, plan, credits) through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
 - Anthropic / Claude provider: reads pay-as-you-go usage and cost (30-day window) through the documented Admin API with an `ANTHROPIC_API_KEY` admin key. No subscription windows; unconfigured keys show a clear state. See `docs/providers/anthropic.md`.
-- DeepSeek provider: shows the account balance with its real currency via the documented `GET /user/balance` endpoint (`DEEPSEEK_API_KEY`). No quota windows exist on DeepSeek, so none are shown. See `docs/providers/deepseek.md`.
+- DeepSeek provider: shows the account balance with its real currency and an
+  estimated spend, via the documented `GET /user/balance` endpoint
+  (`DEEPSEEK_API_KEY` or a saved key). No quota windows exist on DeepSeek, so
+  none are shown. See `docs/providers/deepseek.md`.
+- Provider credentials in Settings: Anthropic and DeepSeek API keys are
+  saved to Windows Credential Manager (never echoed back); Codex uses your
+  `codex login` session directly. Cards show each provider's model in use,
+  and live token activity (in/out) where the provider reports it.
 - Unsubscribed **and unconfigured** providers are hidden automatically and reappear when resubscribed or configured (state derived per refresh; `hasSubscription` in snapshots; `authentication_required` errors collapse until configured). Transient failures and expired auth still show their error card.
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.

@@ -47,8 +47,29 @@ mapping, interpretation/provenance, failures, and limitations.
   `cargo test` (42)
 - `npm run typecheck`, `npm run lint`, `npm test` (8), `npm run build`
 
+## Follow-up: credentials UI, model, and spend estimate
+
+Added after the milestone commit on the same branch:
+
+- **Provider credentials in Settings**: Anthropic and DeepSeek API keys are
+  saved to Windows Credential Manager (`keyring`) and honored with the env
+  vars as fallback; new IPC commands `save_provider_key`,
+  `delete_provider_key`, `provider_key_status` (status only — secrets are
+  never returned or logged). Codex row explains the reused `codex login`.
+- **Spend estimate**: `spendEstimate` on snapshots (schema v5) — the
+  positive balance decrease between the oldest stored balance in the
+  trailing 30 days and the current balance, computed in
+  `attach_spend_estimates` before persistence; requires two prior balance
+  points and matching currency; labeled as an estimate.
+- **Model**: `model` on snapshots (schema v6) — codex quota-alias model and
+  Anthropic dominant model in the report; never fabricated.
+- **Token display**: provenance-aware card labels with input/output/cached
+  breakdown for Anthropic.
+- Tests: 47 Rust (5 new: spend-estimate math + requirements, key-store
+  precedence/validation), 10 frontend (token/model/spend rendering,
+  settings credential save flow).
+
 ## Deferred
 
-DeepSeek key-entry UI + keyring storage (shared with Anthropic); local
-token/cost accounting (analytics milestone); polling; notifications; local
-API; packaging.
+Local token/cost accounting in Ellie (analytics milestone); polling;
+notifications; local API; packaging.

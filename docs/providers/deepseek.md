@@ -50,13 +50,30 @@ and not invented.
 
 ## Authentication
 
-- `DEEPSEEK_API_KEY` environment variable (key from platform.deepseek.com);
-  read per fetch, held in memory, never stored or logged.
-- `detect()` reports `authentication_required` (with instructions) when the
-  variable is missing. Because unconfigured providers are hidden by the
-  dashboard, a fresh install shows no DeepSeek card until a key is set.
-- Key-entry UI and keyring/Windows Credential Manager storage are deferred
-  (consistent with the Anthropic provider decision).
+- DeepSeek API keys (platform.deepseek.com) are stored in **Windows
+  Credential Manager** via Settings → Provider credentials, or read from the
+  `DEEPSEEK_API_KEY` environment variable (env wins). Keys are validated,
+  never logged, and never echoed back through the UI or IPC; only the
+  configured/not-configured status is exposed.
+- `detect()` reports `authentication_required` when neither source has a
+  key. Because unconfigured providers are hidden by the dashboard, a fresh
+  install shows no DeepSeek card until a key is saved.
+
+## Cost used (estimated)
+
+DeepSeek exposes no usage/cost API, so Ellie computes an **estimate**: the
+balance decrease between the oldest stored balance snapshot inside the
+trailing 30 days and the current balance (`spendEstimate` on the snapshot).
+Rules:
+
+- needs two prior balance observations in the window (a single point is
+  usually the initial top-up, not spend);
+- only a *positive* decrease counts (top-ups raise the balance and produce
+  no estimate);
+- currency must match the current balance; `windowDays` reports the actual
+  span covered;
+- rendered as "≈ spent (last N days)" and labeled as an estimate — top-ups
+  and granted-balance expiry can skew it. Never presented as official usage.
 
 ## Fields
 
@@ -66,6 +83,7 @@ and not invented.
 | `balance_infos[].total_balance` | `balance` | Decimal string parsed to `f64`; must be finite and ≥ 0 |
 | `is_available` | — | Not surfaced directly; zero balance when false |
 | `granted_balance` / `topped_up_balance` | — | Composition details not surfaced in v0.1 |
+| balance history | `spendEstimate` | See “Cost used (estimated)” above; `None` until computable |
 
 ## Interpretation and provenance
 
@@ -89,8 +107,9 @@ and not invented.
 
 ## Limitations
 
-- Balance only — no windows, usage reports, resets, or cost.
-- Requires a DeepSeek API key; no live verification performed on the
-  development machine (no key present at milestone time).
-- No local token/cost accounting yet.
-- Env changes require an app restart (no settings UI yet).
+- Balance and spend estimate only — no windows, usage reports, resets, or
+  exact cost; the estimate is balance-derived with explicit caveats.
+- No local token/cost accounting yet (requires local capture, deferred to
+  analytics).
+- An estimate needs the app to have collected at least two balance
+  snapshots (app starts; polling in a later milestone will make it precise).

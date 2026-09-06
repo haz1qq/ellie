@@ -8,6 +8,7 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/tray.rs` | Native tray menu, restore/focus, settings navigation, quit |
 | `src-tauri/src/commands.rs` | Typed IPC and serialized preference writes |
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
+| `src-tauri/src/credentials.rs` | Windows Credential Manager (keyring) key storage and key IPC status |
 | `src-tauri/src/history.rs` | Snapshot persistence, retrieval, and 90-day retention |
 | `src-tauri/src/providers/` | Provider abstraction, registry, models, and adapters (mock, OpenAI/Codex, Anthropic/Claude, DeepSeek) |
 | `src-tauri/src/settings.rs` | Non-sensitive, strictly typed preferences |
@@ -23,6 +24,6 @@ Tray navigation sets the intended view in native state and emits a window-scoped
 
 ## Dependencies
 
-Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides an async mutex and timers, serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the Anthropic Admin API calls. Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests. Keyring, Axum, and analytics dependencies are deferred until used.
+Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides an async mutex and timers, serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the Anthropic Admin API calls; keyring persists provider API keys in Windows Credential Manager. Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests. Axum and analytics dependencies are deferred until used.
 
 The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter plus live adapters for OpenAI / Codex (codex app-server over stdio), Anthropic / Claude (documented Admin API usage and cost), and DeepSeek (documented balance endpoint). Authentication is reused (`codex login`) or env-key-based (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`); Ellie never stores tokens or logs secrets. Snapshots carry an explicit subscription flag so unsubscribed providers hide and reappear on resubscription, and unconfigured providers collapse until configured. No other real provider integrations exist, and other initial provider labels describe the roadmap only, not runtime capabilities. No invented quota windows, balances, estimates, or reset times are displayed as account data.
