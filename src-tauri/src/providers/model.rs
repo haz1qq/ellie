@@ -119,6 +119,8 @@ pub struct UsageSnapshot {
     pub windows: Vec<UsageWindow>,
     pub credits: Option<f64>,
     pub balance: Option<f64>,
+    /// ISO-4217 currency code for `balance` (for example `USD`, `CNY`).
+    pub balance_currency: Option<String>,
     pub token_usage: Option<TokenUsage>,
     pub fetched_at: DateTime<Utc>,
 }
@@ -217,6 +219,7 @@ mod tests {
             windows: vec![],
             credits: None,
             balance: Some(-0.01),
+            balance_currency: None,
             token_usage: None,
             fetched_at: Utc::now(),
         };

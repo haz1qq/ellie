@@ -33,8 +33,8 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
     transaction.execute(
         "INSERT INTO usage_snapshots
              (provider_id, account_id, fetched_at, data_kind, auth_state,
-              capabilities_json, credits, balance, has_subscription)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              capabilities_json, credits, balance, has_subscription, balance_currency)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             provider_id,
             account_id,
@@ -45,6 +45,7 @@ pub fn insert_snapshot(path: &Path, snapshot: &UsageSnapshot) -> Result<i64, App
             snapshot.credits,
             snapshot.balance,
             snapshot.has_subscription.map(|value| value as i64),
+            snapshot.balance_currency,
         ],
     )?;
     let snapshot_id = transaction.last_insert_rowid();
@@ -254,12 +255,13 @@ struct RawSnapshot {
     credits: Option<f64>,
     balance: Option<f64>,
     has_subscription: Option<bool>,
+    balance_currency: Option<String>,
 }
 
 fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnapshot, AppError> {
     let raw: RawSnapshot = connection.query_row(
         "SELECT provider_id, account_id, fetched_at, data_kind, auth_state,
-                capabilities_json, credits, balance, has_subscription
+                capabilities_json, credits, balance, has_subscription, balance_currency
          FROM usage_snapshots WHERE id = ?1",
         params![snapshot_id],
         |row| {
@@ -275,6 +277,7 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
                 has_subscription: row
                     .get(8)
                     .map(|value: Option<i64>| value.map(|value| value != 0))?,
+                balance_currency: row.get(9)?,
             })
         },
     )?;
@@ -312,6 +315,7 @@ fn load_snapshot(connection: &Connection, snapshot_id: i64) -> Result<UsageSnaps
         windows,
         credits: raw.credits,
         balance: raw.balance,
+        balance_currency: raw.balance_currency,
         token_usage,
         fetched_at: parse_timestamp(&raw.fetched_at).ok_or(AppError::Storage)?,
     })
@@ -509,6 +513,7 @@ mod tests {
             }],
             credits: None,
             balance: Some(12.5),
+            balance_currency: Some("USD".into()),
             token_usage: Some(TokenUsage {
                 input_tokens: Some(1_000),
                 output_tokens: Some(500),

@@ -127,6 +127,7 @@ async fn anthropic_api_fetch(api: AnthropicApi) -> Result<UsageSnapshot, Provide
         windows: Vec::new(),
         credits: None,
         balance: None,
+        balance_currency: None,
         token_usage: Some(TokenUsage {
             input_tokens: Some(input_tokens),
             output_tokens: Some(output_tokens),

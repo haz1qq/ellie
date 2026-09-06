@@ -338,6 +338,7 @@ fn snapshot_from_response(
         windows,
         credits,
         balance: None,
+        balance_currency: None,
         token_usage: None,
         fetched_at,
     })

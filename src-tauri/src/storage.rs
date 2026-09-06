@@ -4,13 +4,14 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
-/// One migration per entry, in order. Index 0 is migration 0001, index 2 is 0003.
+/// One migration per entry, in order. Index 0 is migration 0001, index 3 is 0004.
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_settings.sql"),
     include_str!("../migrations/0002_history.sql"),
     include_str!("../migrations/0003_subscription.sql"),
+    include_str!("../migrations/0004_balance_currency.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -144,7 +145,7 @@ mod tests {
         let connection = connect(&path)?;
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            3
+            4
         );
         assert_eq!(
             connection.query_row("SELECT COUNT(*) FROM usage_snapshots", [], |row| row
@@ -184,7 +185,7 @@ mod tests {
         let connection = connect(&path)?;
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            3
+            4
         );
         assert!(
             connection.query_row(
