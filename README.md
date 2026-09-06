@@ -21,6 +21,8 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
 
 - Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
 - OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, resets, plan, credits) through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
+- Anthropic / Claude provider: reads pay-as-you-go usage and cost (30-day window) through the documented Admin API with an `ANTHROPIC_API_KEY` admin key. No subscription windows; unconfigured keys show a clear state. See `docs/providers/anthropic.md`.
+- Unsubscribed providers are hidden automatically and reappear when resubscribed (state derived per refresh; `hasSubscription` in snapshots).
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, notification table stubs).
