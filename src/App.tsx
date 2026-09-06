@@ -405,9 +405,7 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
         </span>
         <div className="provider-name">
           <h3>{snapshot.displayName}</h3>
-          <p>
-            {snapshot.accountLabel} · {snapshot.plan}
-          </p>
+          {headerDetail(snapshot) && <p>{headerDetail(snapshot)}</p>}
         </div>
         {snapshot.dataKind === "mock" && (
           <span className="mock-badge">Mock data</span>
@@ -421,6 +419,13 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
             dataKind={snapshot.dataKind}
           />
         ))}
+      {snapshot.balance !== null && (
+        <div className="balance-summary">
+          <span>Account balance</span>
+          <span>{formatBalance(snapshot.balance, snapshot.balanceCurrency)}</span>
+          <small>Reported by the provider with its real currency</small>
+        </div>
+      )}
       {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
         <div className="token-summary">
           <span>Sample token activity</span>
@@ -487,6 +492,21 @@ function UsageWindowCard({
 
 function formatCount(value: number | null) {
   return value === null ? "—" : new Intl.NumberFormat().format(value);
+}
+function headerDetail(snapshot: UsageSnapshot) {
+  return [snapshot.accountLabel, snapshot.plan].filter(Boolean).join(" · ");
+}
+function formatBalance(value: number, currency: string | null) {
+  const amount = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (!currency) return amount;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(value);
+  } catch {
+    return `${currency} ${amount}`;
+  }
 }
 function formatReset(
   value: string | null,

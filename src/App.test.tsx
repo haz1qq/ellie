@@ -48,6 +48,8 @@ const demoProviders: ProviderOverview[] = [
         estimatedCostUsd: 0.42,
         source: "locally_calculated",
       },
+      balance: null,
+      balanceCurrency: null,
       fetchedAt: "2026-09-06T08:00:00Z",
     },
     error: null,
@@ -91,6 +93,8 @@ const liveProviders: ProviderOverview[] = [
         },
       ],
       tokenUsage: null,
+      balance: null,
+      balanceCurrency: null,
       fetchedAt: "2026-09-06T14:00:00Z",
     },
     error: null,
@@ -230,6 +234,8 @@ describe("bootstrap shell", () => {
             },
           ],
           tokenUsage: null,
+          balance: null,
+          balanceCurrency: null,
           fetchedAt: "2026-09-06T14:00:00Z",
         },
         error: null,
@@ -298,6 +304,49 @@ describe("bootstrap shell", () => {
     expect(screen.getByText("unavailable")).toBeVisible();
     expect(screen.queryByText("authentication_required")).not.toBeInTheDocument();
     expect(screen.getByText("Ellie Demo")).toBeVisible();
+  });
+
+  it("renders provider-reported account balance with its currency", async () => {
+    const deepseek: ProviderOverview[] = [
+      {
+        snapshot: {
+          providerId: "deepseek",
+          displayName: "DeepSeek",
+          accountLabel: null,
+          plan: null,
+          capabilities: {
+            quotaWindows: false,
+            tokenUsage: false,
+            accountBalance: true,
+            credits: false,
+            costTracking: false,
+            localHistory: false,
+          },
+          authState: "authenticated",
+          hasSubscription: null,
+          dataKind: "live",
+          windows: [],
+          tokenUsage: null,
+          balance: 110,
+          balanceCurrency: "CNY",
+          fetchedAt: "2026-09-06T14:00:00Z",
+        },
+        error: null,
+      },
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: deepseek,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("DeepSeek")).toBeVisible();
+    expect(screen.getByText("Account balance")).toBeVisible();
+    expect(screen.getByText(/110/)).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
   });
 
   it("offers retry when settings cannot be loaded", async () => {

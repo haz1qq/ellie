@@ -489,3 +489,25 @@ legend {
 .token-summary small {
   grid-column: 1/-1;
 }
+.balance-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.balance-summary span:first-child {
+  color: var(--muted);
+}
+.balance-summary span:last-child {
+  color: var(--pink);
+  font-weight: 600;
+}
+.balance-summary small {
+  grid-column: 1/-1;
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}

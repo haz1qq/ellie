@@ -49,6 +49,9 @@ export interface UsageSnapshot {
   dataKind: DataKind;
   windows: UsageWindow[];
   tokenUsage: TokenUsage | null;
+  balance: number | null;
+  /** ISO-4217 code for `balance` (e.g. "USD", "CNY"); null when no balance is reported */
+  balanceCurrency: string | null;
   fetchedAt: string;
 }
 export interface ProviderOverview {
