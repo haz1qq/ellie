@@ -3,6 +3,7 @@ import { Cat } from "./components/Cat";
 import { copy } from "./copy";
 import {
   desktop,
+  type ProviderKeySource,
   type ProviderOverview,
   type Settings,
   type UsageSnapshot,
@@ -278,6 +279,7 @@ export default function App() {
                 <p>Open the desktop app to manage your local preferences.</p>
               )
             )}
+            <ProviderCredentials />
             <div className="settings-note">
               <h2>Dark mode, by default.</h2>
               <p>
@@ -294,6 +296,127 @@ export default function App() {
         <span>Trust the number.</span>
       </footer>
     </div>
+  );
+}
+
+function ProviderCredentials() {
+  const [status, setStatus] = useState<Map<string, ProviderKeySource>>(
+    new Map(),
+  );
+  const [anthropic, setAnthropic] = useState("");
+  const [deepseek, setDeepseek] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const refresh = () => {
+    void desktop.providerKeyStatus().then((rows) => {
+      setStatus(new Map(rows.map((row) => [row.providerId, row.source])));
+    });
+  };
+  useEffect(refresh, []);
+
+  const saveKey = async (providerId: string, key: string, clear: () => void) => {
+    if (!key.trim()) return;
+    setBusy(true);
+    try {
+      await desktop.saveProviderKey(providerId, key);
+      clear();
+      setMessage("Key saved to Windows Credential Manager.");
+      refresh();
+    } catch {
+      setMessage("The key could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeKey = async (providerId: string) => {
+    setBusy(true);
+    try {
+      await desktop.deleteProviderKey(providerId);
+      setMessage("Key removed.");
+      refresh();
+    } catch {
+      setMessage("The key could not be removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sourceLabel = (source: ProviderKeySource | undefined) =>
+    source === "environment"
+      ? "From environment"
+      : source === "credential_manager"
+        ? "Saved on this device"
+        : "Not set";
+
+  return (
+    <fieldset disabled={busy}>
+      <legend>Provider credentials</legend>
+      <p className="credential-intro">
+        Keys are stored in Windows Credential Manager and never shown again.
+      </p>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>Anthropic / Claude</strong>
+          <span>
+            Admin key (sk-ant-admin) for usage and cost reports ·{" "}
+            {sourceLabel(status.get("anthropic-claude"))}
+          </span>
+        </div>
+        <input
+          type="password"
+          value={anthropic}
+          placeholder="sk-ant-admin-…"
+          onChange={(event) => setAnthropic(event.target.value)}
+          aria-label="Anthropic API key"
+        />
+        <button
+          aria-label="Save Anthropic API key"
+          onClick={() =>
+            void saveKey("anthropic-claude", anthropic, () => setAnthropic(""))
+          }
+        >
+          Save
+        </button>
+        {status.get("anthropic-claude") === "credential_manager" && (
+          <button onClick={() => void removeKey("anthropic-claude")}>
+            Remove
+          </button>
+        )}
+      </div>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>DeepSeek</strong>
+          <span>
+            API key from platform.deepseek.com · {sourceLabel(status.get("deepseek"))}
+          </span>
+        </div>
+        <input
+          type="password"
+          value={deepseek}
+          placeholder="sk-…"
+          onChange={(event) => setDeepseek(event.target.value)}
+          aria-label="DeepSeek API key"
+        />
+        <button
+          aria-label="Save DeepSeek API key"
+          onClick={() => void saveKey("deepseek", deepseek, () => setDeepseek(""))}
+        >
+          Save
+        </button>
+        {status.get("deepseek") === "credential_manager" && (
+          <button onClick={() => void removeKey("deepseek")}>Remove</button>
+        )}
+      </div>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>OpenAI / Codex</strong>
+          <span>Uses your `codex login` session; Ellie reuses it directly.</span>
+        </div>
+      </div>
+      <p className="credential-message" role="status">
+        {message}
+      </p>
+    </fieldset>
   );
 }
 
@@ -406,6 +529,7 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
         <div className="provider-name">
           <h3>{snapshot.displayName}</h3>
           {headerDetail(snapshot) && <p>{headerDetail(snapshot)}</p>}
+          {snapshot.model && <p className="provider-model">Model: {snapshot.model}</p>}
         </div>
         {snapshot.dataKind === "mock" && (
           <span className="mock-badge">Mock data</span>
@@ -423,20 +547,59 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
         <div className="balance-summary">
           <span>Account balance</span>
           <span>{formatBalance(snapshot.balance, snapshot.balanceCurrency)}</span>
-          <small>Reported by the provider with its real currency</small>
+          {snapshot.spendEstimate && (
+            <>
+              <span>≈ spent (last {snapshot.spendEstimate.windowDays} days)</span>
+              <span>
+                {formatBalance(
+                  snapshot.spendEstimate.amount,
+                  snapshot.spendEstimate.currency,
+                )}
+              </span>
+              <small>
+                Estimated by Ellie from reported balance changes; top-ups can
+                skew it
+              </small>
+            </>
+          )}
         </div>
       )}
       {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
-        <div className="token-summary">
-          <span>Sample token activity</span>
-          <span>
-            {formatCount(snapshot.tokenUsage.totalTokens)} tokens ·{" "}
-            {formatCount(snapshot.tokenUsage.requestCount)} requests
-          </span>
-          <small>Locally calculated sample · illustrative only</small>
-        </div>
+        <TokenSummaryCard snapshot={snapshot} />
       )}
     </article>
+  );
+}
+
+function TokenSummaryCard({ snapshot }: { snapshot: UsageSnapshot }) {
+  const tokens = snapshot.tokenUsage!;
+  const mock = snapshot.dataKind === "mock";
+  const windowLabel = mock
+    ? "Sample token activity"
+    : "Token activity (last 30 days)";
+  const breaksDown =
+    tokens.inputTokens !== undefined && tokens.outputTokens !== undefined;
+  return (
+    <div className="token-summary">
+      <span>{windowLabel}</span>
+      <span>
+        {formatCount(tokens.totalTokens)} tokens ·{" "}
+        {breaksDown
+          ? `${formatCount(tokens.inputTokens)} in / ${formatCount(tokens.outputTokens)} out`
+          : `${formatCount(tokens.requestCount)} requests`}
+      </span>
+      <small>
+        {tokens.estimatedCostUsd !== null &&
+          `${formatBalance(tokens.estimatedCostUsd, "USD")} · `}
+        {tokens.cachedInputTokens !== undefined &&
+          `${formatCount(tokens.cachedInputTokens)} cached input · `}
+        {mock
+          ? "Locally calculated sample · illustrative only"
+          : tokens.source === "locally_calculated"
+            ? "Locally calculated by Ellie (window chosen and summed from provider buckets)"
+            : "Provider-reported"}
+      </small>
+    </div>
   );
 }
 
@@ -490,8 +653,8 @@ function UsageWindowCard({
   );
 }
 
-function formatCount(value: number | null) {
-  return value === null ? "—" : new Intl.NumberFormat().format(value);
+function formatCount(value: number | null | undefined) {
+  return value == null ? "—" : new Intl.NumberFormat().format(value);
 }
 function headerDetail(snapshot: UsageSnapshot) {
   return [snapshot.accountLabel, snapshot.plan].filter(Boolean).join(" · ");

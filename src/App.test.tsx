@@ -11,6 +11,9 @@ vi.mock("./lib/desktop", () => ({
     saveSettings: vi.fn(),
     hide: vi.fn(),
     onNavigate: vi.fn(),
+    saveProviderKey: vi.fn(),
+    deleteProviderKey: vi.fn(),
+    providerKeyStatus: vi.fn(),
   },
 }));
 const initial = { closeToTray: true, showMascot: true, friendlyMessages: true };
@@ -50,6 +53,8 @@ const demoProviders: ProviderOverview[] = [
       },
       balance: null,
       balanceCurrency: null,
+      spendEstimate: null,
+      model: null,
       fetchedAt: "2026-09-06T08:00:00Z",
     },
     error: null,
@@ -95,6 +100,8 @@ const liveProviders: ProviderOverview[] = [
       tokenUsage: null,
       balance: null,
       balanceCurrency: null,
+      spendEstimate: null,
+      model: null,
       fetchedAt: "2026-09-06T14:00:00Z",
     },
     error: null,
@@ -103,6 +110,7 @@ const liveProviders: ProviderOverview[] = [
 
 beforeEach(() => {
   vi.mocked(desktop.available).mockReturnValue(true);
+  vi.mocked(desktop.providerKeyStatus).mockResolvedValue([]);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
@@ -236,6 +244,8 @@ describe("bootstrap shell", () => {
           tokenUsage: null,
           balance: null,
           balanceCurrency: null,
+          spendEstimate: null,
+          model: null,
           fetchedAt: "2026-09-06T14:00:00Z",
         },
         error: null,
@@ -329,6 +339,8 @@ describe("bootstrap shell", () => {
           tokenUsage: null,
           balance: 110,
           balanceCurrency: "CNY",
+          spendEstimate: null,
+          model: null,
           fetchedAt: "2026-09-06T14:00:00Z",
         },
         error: null,
@@ -347,6 +359,91 @@ describe("bootstrap shell", () => {
     expect(screen.getByText("Account balance")).toBeVisible();
     expect(screen.getByText(/110/)).toBeVisible();
     expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+  });
+
+  it("renders live token breakdown, model, and spend estimate for balance providers", async () => {
+    const anthropic: ProviderOverview[] = [
+      {
+        snapshot: {
+          providerId: "anthropic-claude",
+          displayName: "Anthropic / Claude",
+          accountLabel: null,
+          plan: null,
+          capabilities: {
+            quotaWindows: false,
+            tokenUsage: true,
+            accountBalance: false,
+            credits: false,
+            costTracking: true,
+            localHistory: false,
+          },
+          authState: "authenticated",
+          hasSubscription: null,
+          dataKind: "live",
+          windows: [],
+          tokenUsage: {
+            totalTokens: 8000,
+            inputTokens: 7200,
+            outputTokens: 800,
+            cachedInputTokens: 1700,
+            requestCount: null,
+            estimatedCostUsd: 2.0,
+            source: "locally_calculated",
+          },
+          balance: 100,
+          balanceCurrency: "USD",
+          spendEstimate: {
+            amount: 20,
+            currency: "USD",
+            windowDays: 10,
+          },
+          model: "claude-opus-5",
+          fetchedAt: "2026-09-06T14:00:00Z",
+        },
+        error: null,
+      },
+    ];
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: anthropic,
+    });
+    render(<App />);
+    await waitFor(() =>
+      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Model: claude-opus-5")).toBeVisible();
+    expect(screen.getByText(/7,200 in \/ 800 out/)).toBeVisible();
+    expect(screen.getByText(/1,700 cached input/)).toBeVisible();
+    expect(screen.getByText("Token activity (last 30 days)")).toBeVisible();
+    expect(screen.getByText(/≈ spent \(last 10 days\)/)).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+  });
+
+  it("saves and reports provider API keys in settings without echoing them", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([
+      { providerId: "anthropic-claude", source: "none" },
+      { providerId: "deepseek", source: "credential_manager" },
+    ]);
+    vi.mocked(desktop.saveProviderKey).mockResolvedValue(undefined);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(
+      screen.getByLabelText("DeepSeek API key"),
+      "sk-test-secret",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save DeepSeek API key" }),
+    );
+    await waitFor(() =>
+      expect(desktop.saveProviderKey).toHaveBeenCalledWith(
+        "deepseek",
+        "sk-test-secret",
+      ),
+    );
+    expect(screen.queryByText("sk-test-secret")).not.toBeInTheDocument();
+    expect(screen.getByText(/Saved on this device/)).toBeVisible();
   });
 
   it("offers retry when settings cannot be loaded", async () => {
