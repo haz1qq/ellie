@@ -17,6 +17,8 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
 
 `npm run dev` opens only the frontend server at `http://127.0.0.1:1420`. Browser preview is labeled and cannot save desktop settings or control the tray.
 
+If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os error 5)`, stop the dev watcher with Ctrl+C, then choose **Quit Ellie** from the tray menu for any remaining Ellie instance. Closing the window normally only hides it. Run `npm run tauri dev` again once Ellie has exited; no database or credential deletion is needed. Native permission changes require a successful rebuild/restart, not just Vite hot reload.
+
 ## Current scope
 
 - Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
@@ -31,11 +33,12 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
   `codex login` session directly. Cards show each provider's model in use,
   and live token activity (in/out) where the provider reports it.
 - Unsubscribed **and unconfigured** providers are hidden automatically and reappear when resubscribed or configured (state derived per refresh; `hasSubscription` in snapshots; `authentication_required` errors collapse until configured). Transient failures and expired auth still show their error card.
+- **Hide** on any provider card removes only its display, including Ellie Demo. Restore it in **Settings → Provider visibility → Show … on dashboard**. Changes save immediately and survive restarts; fetching, credentials, and history are unchanged. Providers still need an active/configured account before their cards can appear.
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, notification table stubs).
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
-- Three persisted preferences: close to tray, dashboard mascot, and friendly messages.
+- Persisted preferences: close to tray, dashboard mascot, friendly messages, and hidden provider cards.
 - Structured JSON lifecycle logs to stdout. No credentials, telemetry, polling, notifications, or local API in this milestone.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.

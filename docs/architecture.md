@@ -1,6 +1,6 @@
 # Architecture
 
-The Tauri 2 executable owns application lifecycle, the Windows tray, settings, SQLite, and the provider framework. React consumes three narrow Rust commands through `src/lib/desktop.ts`. The frontend does not receive filesystem paths, raw database access, or provider authentication.
+The Tauri 2 executable owns application lifecycle, the Windows tray, settings, SQLite, and the provider framework. React consumes narrow Rust commands through `src/lib/desktop.ts`. The frontend does not receive filesystem paths, raw database access, or provider authentication.
 
 | Module | Responsibility |
 | --- | --- |
@@ -21,6 +21,16 @@ Startup initializes SQLite on a blocking worker and waits before exposing the ap
 Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification table stubs. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
 
 Tray navigation sets the intended view in native state and emits a window-scoped navigation event. The frontend subscribes before reading initial state, supporting early tray interactions. Left-click restores the overview; the Settings menu opens the settings view. Refresh is disabled because there are no provider adapters.
+
+## Provider visibility
+
+`Settings.hiddenProviderIds` is a bounded, unique list of provider IDs. Migration 7 adds a JSON-array column to `application_settings`, defaulting to `[]` (no manually hidden cards) for existing users. The existing `save_settings` command persists it with the appearance preferences, using the same serialized, blocking-worker write path. Invalid IDs, duplicates, and overlong lists are rejected before storage.
+
+Each `ProviderOverview` includes registry-owned `providerId` and `displayName` even on fetch failure. This lets the UI offer visibility controls for every registered provider without hard-coding a provider catalog or depending on a successful snapshot. **Hide** on a card and **Show … on dashboard** in Settings save immediately. UI state changes only after a successful write; changing visibility preserves unsaved appearance edits.
+
+Visibility is presentation-only: adapters still fetch, successful snapshots still persist, and no credentials/history are deleted. All providers, including Ellie Demo and unconfigured/failed providers, remain listed in Settings. Enabling display does not override automatic hiding for `hasSubscription === false` or `authentication_required`. No new IPC commands or permissions are needed.
+
+Temporary-database tests cover migration from schema 6, default visibility, persistence after reopening, restoration without deleting history, and invalid-input rejection. UI tests cover hide/restore, persisted preferences, failed saves/restores, in-flight disabled controls, failed-provider identity, and automatic authentication hiding. Native Windows visibility/restart smoke verification remains required.
 
 ## Dependencies
 
