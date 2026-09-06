@@ -6,6 +6,7 @@ export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;
   friendlyMessages: boolean;
+  hiddenProviderIds: string[];
 }
 export interface Bootstrap {
   settings: Settings;
@@ -67,6 +68,8 @@ export interface UsageSnapshot {
   fetchedAt: string;
 }
 export interface ProviderOverview {
+  providerId: string;
+  displayName: string;
   snapshot: UsageSnapshot | null;
   error:
     | "invalid_snapshot"

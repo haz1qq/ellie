@@ -22,9 +22,10 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
   const visibleProviders = providers.filter(
     (provider) =>
-      provider.snapshot
+      !(settings?.hiddenProviderIds ?? []).includes(provider.providerId) &&
+      (provider.snapshot
         ? provider.snapshot.hasSubscription !== false
-        : provider.error !== "authentication_required",
+        : provider.error !== "authentication_required"),
   );
   const native = desktop.available();
 
@@ -83,6 +84,31 @@ export default function App() {
       setError(
         "Your settings were not saved. Try again. Your previous settings are still active.",
       );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setProviderVisibility(providerId: string, visible: boolean) {
+    if (!settings || saving || !native) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    const hiddenProviderIds = visible
+      ? (settings.hiddenProviderIds ?? []).filter((id) => id !== providerId)
+      : [...new Set([...(settings.hiddenProviderIds ?? []), providerId])];
+    try {
+      const saved = await desktop.saveSettings({ ...settings, hiddenProviderIds });
+      setSettings(saved);
+      // Do not discard unsaved appearance edits when changing visibility.
+      setDraft((current) => current
+        ? { ...current, hiddenProviderIds: saved.hiddenProviderIds }
+        : saved);
+      setNotice(visible
+        ? "Provider display enabled. Unconfigured or unsubscribed providers stay hidden."
+        : "Provider hidden. Show it again in Settings → Provider visibility.");
+    } catch {
+      setError("Provider visibility was not saved. Your previous display settings are still active. Try again.");
     } finally {
       setSaving(false);
     }
@@ -161,6 +187,7 @@ export default function App() {
             )}
           </div>
         )}
+        {notice && view === "dashboard" && <p role="status">{notice}</p>}
         {loading && <p role="status">Opening your local settings…</p>}
         {view === "dashboard" ? (
           <>
@@ -202,12 +229,12 @@ export default function App() {
                 {providers.length === 0 ? (
                   <ProviderUnavailable />
                 ) : (
-                  visibleProviders.map((provider, index) => (
+                  visibleProviders.map((provider) => (
                     <ProviderCard
-                      key={
-                        provider.snapshot?.providerId ?? `error-${index}`
-                      }
+                      key={provider.providerId}
                       provider={provider}
+                      hideDisabled={saving || !settings || !native || !provider.providerId}
+                      onHide={() => void setProviderVisibility(provider.providerId, false)}
                     />
                   ))
                 )}
@@ -278,6 +305,27 @@ export default function App() {
               !loading && (
                 <p>Open the desktop app to manage your local preferences.</p>
               )
+            )}
+            {settings && (
+              <fieldset className="provider-visibility" disabled={saving || !native}>
+                <legend>Provider visibility</legend>
+                <p>
+                  Changes save immediately. Hidden cards keep their credentials,
+                  history, and data fetching. Unconfigured or unsubscribed providers
+                  remain hidden until active.
+                </p>
+                {providers.map((provider) => (
+                  <Setting
+                    key={provider.providerId}
+                    label={`Show ${provider.displayName} on dashboard`}
+                    detail={provider.snapshot?.dataKind === "mock"
+                      ? "Demo provider · illustrative data, not a connected account."
+                      : "Display preference only; this does not disconnect your account."}
+                    checked={!(settings.hiddenProviderIds ?? []).includes(provider.providerId)}
+                    onChange={(visible) => void setProviderVisibility(provider.providerId, visible)}
+                  />
+                ))}
+              </fieldset>
             )}
             <ProviderCredentials />
             <div className="settings-note">
@@ -471,7 +519,7 @@ function usageDescription(
     return "Provider connections are not available in this build.";
   }
   if (visible.length === 0) {
-    return "Nothing active right now — hidden providers return when you subscribe or configure them.";
+    return "No visible providers. Check Provider visibility in Settings; unconfigured or unsubscribed providers also stay hidden.";
   }
   return hasLiveData(visible)
     ? "Cards show live quota from your configured logins; demo cards stay labeled."
@@ -483,7 +531,7 @@ function usageNote(providers: ProviderOverview[], visible: ProviderOverview[]) {
     return "No provider requests.";
   }
   if (visible.length === 0) {
-    return "Inactive providers are hidden until you subscribe or configure them.";
+    return "Show hidden cards in Settings → Provider visibility. No credentials or history are deleted.";
   }
   return hasLiveData(visible)
     ? "Live data comes from your codex CLI login on this machine; no token is stored."
@@ -505,17 +553,29 @@ function ProviderUnavailable() {
   );
 }
 
-function ProviderCard({ provider }: { provider: ProviderOverview }) {
+function ProviderCard({ provider, onHide, hideDisabled }: {
+  provider: ProviderOverview;
+  onHide: () => void;
+  hideDisabled: boolean;
+}) {
+  const hideButton = (
+    <button type="button" className="provider-hide" disabled={hideDisabled}
+      aria-label={`Hide ${provider.displayName}`} onClick={onHide}>
+      Hide
+    </button>
+  );
   if (!provider.snapshot) {
     return (
       <article className="provider">
         <div className="provider-name">
-          <h3>Provider unavailable</h3>
+          <h3>{provider.displayName}</h3>
+          <p>Provider unavailable</p>
           <p>Ellie kept other provider results available.</p>
         </div>
         <span className="unavailable">
           {provider.error?.replaceAll("_", " ")}
         </span>
+        {hideButton}
       </article>
     );
   }
@@ -567,6 +627,7 @@ function ProviderCard({ provider }: { provider: ProviderOverview }) {
       {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
         <TokenSummaryCard snapshot={snapshot} />
       )}
+      {hideButton}
     </article>
   );
 }

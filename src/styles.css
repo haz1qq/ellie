@@ -349,10 +349,20 @@ legend {
   padding-top: 20px;
   border-top: 1px solid var(--border);
 }
-fieldset.credentials {
+fieldset.credentials,
+fieldset.provider-visibility {
   margin-top: 32px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
+}
+.provider-hide {
+  align-self: flex-start;
+  margin-top: 12px;
+}
+.provider-visibility > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .settings-note h2 {
   font-size: 13px;
