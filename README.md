@@ -22,11 +22,12 @@ If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no 
 - Dark React dashboard with a static illustrative cat and optional friendly copy.
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
-- Local SQLite initialization with a transactional, versioned settings migration.
+- Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, notification table stubs).
+- Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - Three persisted preferences: close to tray, dashboard mascot, and friendly messages.
-- Structured JSON lifecycle logs to stdout. No provider calls, credentials, telemetry, history, polling, or local API in this milestone.
+- Structured JSON lifecycle logs to stdout. No provider calls, credentials, telemetry, polling, notifications, or local API in this milestone.
 
-SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains only non-sensitive preferences. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
+SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
 ## Checks
 

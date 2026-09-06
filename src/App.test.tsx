@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { desktop } from "./lib/desktop";
+import { desktop, type ProviderOverview } from "./lib/desktop";
 
 vi.mock("./lib/desktop", () => ({
   desktop: {
@@ -14,6 +14,44 @@ vi.mock("./lib/desktop", () => ({
   },
 }));
 const initial = { closeToTray: true, showMascot: true, friendlyMessages: true };
+const demoProviders: ProviderOverview[] = [
+  {
+    snapshot: {
+      providerId: "ellie-demo",
+      displayName: "Ellie Demo",
+      accountLabel: "Illustrative account",
+      plan: "Demo",
+      capabilities: {
+        quotaWindows: true,
+        tokenUsage: true,
+        accountBalance: false,
+        credits: false,
+        costTracking: true,
+        localHistory: false,
+      },
+      authState: "unsupported",
+      dataKind: "mock",
+      windows: [
+        {
+          id: "sample-window",
+          label: "Sample allowance",
+          usedPercent: 41,
+          remainingPercent: 59,
+          resetAt: "2026-09-06T12:00:00Z",
+          source: "provider_reported",
+        },
+      ],
+      tokenUsage: {
+        totalTokens: 145000,
+        requestCount: 28,
+        estimatedCostUsd: 0.42,
+        source: "locally_calculated",
+      },
+      fetchedAt: "2026-09-06T08:00:00Z",
+    },
+    error: null,
+  },
+];
 
 beforeEach(() => {
   vi.mocked(desktop.available).mockReturnValue(true);
@@ -21,21 +59,28 @@ beforeEach(() => {
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
     view: "dashboard",
+    providers: demoProviders,
   });
 });
 
 describe("bootstrap shell", () => {
-  it("does not invent usage or suggest providers are connected", async () => {
+  it("renders mock usage with clear provenance rather than live provider claims", async () => {
     render(<App />);
     await waitFor(() =>
       expect(
         screen.queryByText("Opening your local settings…"),
       ).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("No usage data yet")).toBeVisible();
-    expect(screen.getAllByText("Not available yet")).toHaveLength(3);
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    expect(screen.getByText("0 connected")).toBeVisible();
+    expect(screen.getByText("Ellie Demo")).toBeVisible();
+    expect(screen.getAllByText("Mock data")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("progressbar", { name: /illustrative data/ }),
+    ).toHaveAttribute("aria-valuenow", "41");
+    expect(
+      screen.getByText(/Illustrative provider-reported sample/),
+    ).toBeVisible();
+    expect(screen.getByText(/Locally calculated sample/)).toBeVisible();
+    expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
   });
 
   it("keeps browser preview separate from desktop settings", async () => {

@@ -4,9 +4,15 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
-fn connect(path: &Path) -> Result<Connection, AppError> {
+/// One migration per entry, in order. Index 0 is migration 0001, index 1 is 0002.
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_settings.sql"),
+    include_str!("../migrations/0002_history.sql"),
+];
+
+pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
     let connection = Connection::open(path)?;
     connection.busy_timeout(Duration::from_secs(3))?;
     connection.pragma_update(None, "foreign_keys", true)?;
@@ -25,9 +31,17 @@ pub fn initialize(path: &Path) -> Result<Settings, AppError> {
     if version > SCHEMA_VERSION {
         return Err(AppError::NewerDatabase);
     }
-    if version == 0 {
-        transaction.execute_batch(include_str!("../migrations/0001_settings.sql"))?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    if version < 0 {
+        return Err(AppError::Storage);
+    }
+    if version < SCHEMA_VERSION {
+        let mut current = version;
+        for migration in &MIGRATIONS[current as usize..] {
+            transaction.execute_batch(migration)?;
+            current += 1;
+            tracing::info!(event = "schema_migrated", to = current);
+        }
+        transaction.pragma_update(None, "user_version", current)?;
     }
     transaction.commit()?;
     read_settings_from(&connection)
@@ -88,6 +102,53 @@ mod tests {
                 0
             ))?,
             1
+        );
+        for table in [
+            "providers",
+            "accounts",
+            "usage_snapshots",
+            "usage_windows",
+            "token_usage",
+            "notification_rules",
+            "notification_state",
+        ] {
+            assert!(connection
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |_| Ok(()),
+                )
+                .is_ok());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn migrating_from_schema_1_preserves_settings_and_history_tables(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        // Simulate a milestone 1 database: settings at schema version 1.
+        let connection = connect(&path)?;
+        connection.execute_batch(include_str!("../migrations/0001_settings.sql"))?;
+        connection.pragma_update(None, "user_version", 1)?;
+        connection.execute(
+            "UPDATE application_settings SET show_mascot = 0 WHERE id = 1",
+            [],
+        )?;
+        drop(connection);
+
+        let settings = initialize(&path)?;
+        assert!(!settings.show_mascot);
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            2
+        );
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM usage_snapshots", [], |row| row
+                .get::<_, i64>(0))?,
+            0
         );
         Ok(())
     }
