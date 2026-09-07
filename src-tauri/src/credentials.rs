@@ -14,6 +14,7 @@ const SERVICE: &str = "ellie";
 
 /// Key-backed providers and the credential account name each uses.
 pub const KEY_PROVIDERS: &[(&str, &str)] = &[
+    ("openai-api", "openai_admin_api_key"),
     ("anthropic-claude", "anthropic_api_key"),
     ("deepseek", "deepseek_api_key"),
 ];
@@ -28,6 +29,7 @@ pub fn provider_account(provider_id: &str) -> Option<&str> {
 /// Environment variable each key-backed provider also honors.
 pub fn provider_env_var(provider_id: &str) -> Option<&'static str> {
     match provider_id {
+        "openai-api" => Some("OPENAI_ADMIN_KEY"),
         "anthropic-claude" => Some("ANTHROPIC_API_KEY"),
         "deepseek" => Some("DEEPSEEK_API_KEY"),
         _ => None,
@@ -176,6 +178,16 @@ mod tests {
         assert_eq!(
             provider_key_status(&store, "deepseek").expect("status"),
             KeySource::CredentialManager
+        );
+    }
+
+    #[test]
+    fn openai_api_uses_a_distinct_admin_credential() {
+        assert_eq!(provider_account("openai-api"), Some("openai_admin_api_key"));
+        assert_eq!(provider_env_var("openai-api"), Some("OPENAI_ADMIN_KEY"));
+        assert_ne!(
+            provider_account("openai-api"),
+            provider_account("openai-codex")
         );
     }
 

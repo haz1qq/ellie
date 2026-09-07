@@ -11,13 +11,13 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
     AuthState, DataKind, DetectionResult, MetricSource, ProviderCapabilities, ProviderError,
-    UsageProvider, UsageSnapshot, UsageWindow,
+    TokenUsage, UsageProvider, UsageSnapshot, UsageWindow,
 };
 
 const PROVIDER_ID: &str = "openai-codex";
@@ -96,6 +96,24 @@ struct CreditsSnapshot {
     unlimited: Option<bool>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetAccountTokenUsageResponse {
+    daily_usage_buckets: Option<Vec<AccountTokenUsageDailyBucket>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountTokenUsageDailyBucket {
+    start_date: String,
+    tokens: i64,
+}
+
+struct AppServerResponses {
+    rate_limits: Value,
+    token_usage: Option<Value>,
+}
+
 /// Reads ChatGPT plan quota through the Codex CLI's own `app-server`
 /// (`account/rateLimits/read` over stdio JSON-RPC). Codex owns login and
 /// token refresh; this provider never receives or stores credentials.
@@ -114,7 +132,7 @@ impl UsageProvider for OpenAiProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             quota_windows: true,
-            token_usage: false,
+            token_usage: true,
             account_balance: false,
             credits: true,
             cost_tracking: false,
@@ -185,14 +203,19 @@ fn fetch_usage_blocking() -> Result<UsageSnapshot, ProviderError> {
     };
 
     let response: GetAccountRateLimitsResponse =
-        serde_json::from_value(reply).map_err(|_| ProviderError::Unavailable)?;
-    snapshot_from_response(response, Utc::now()).map_err(|_| ProviderError::Unavailable)
+        serde_json::from_value(reply.rate_limits).map_err(|_| ProviderError::Unavailable)?;
+    let token_usage = reply
+        .token_usage
+        .and_then(|value| serde_json::from_value::<GetAccountTokenUsageResponse>(value).ok());
+    snapshot_from_response(response, token_usage.as_ref(), Utc::now())
+        .map_err(|_| ProviderError::Unavailable)
 }
 
-/// Performs the app-server handshake and the `account/rateLimits/read` call
-/// over newline-delimited JSON-RPC (no `jsonrpc` header on the wire). The
-/// reply payload for the rate-limit request is returned.
-fn run_exchange(child: &mut Child) -> Result<Value, ProviderError> {
+/// Performs the app-server handshake, reads quota, then best-effort reads
+/// token activity over newline-delimited JSON-RPC (no `jsonrpc` header on the
+/// wire). Older Codex versions may not implement `account/usage/read`; quota
+/// remains available and token activity is simply omitted in that case.
+fn run_exchange(child: &mut Child) -> Result<AppServerResponses, ProviderError> {
     let stdin = child.stdin.take().ok_or(ProviderError::Unavailable)?;
     let stdout = child.stdout.take().ok_or(ProviderError::Unavailable)?;
     let stderr = child.stderr.take().ok_or(ProviderError::Unavailable)?;
@@ -235,7 +258,14 @@ fn run_exchange(child: &mut Child) -> Result<Value, ProviderError> {
         .and_then(|_| wire.recv(child, 1))
         .and_then(|_| wire.send(json!({ "method": "notifications/initialized" })))
         .and_then(|_| wire.send(json!({ "method": "account/rateLimits/read", "id": 2 })))
-        .and_then(|_| wire.recv(child, 2));
+        .and_then(|_| wire.recv(child, 2))
+        .map(|rate_limits| AppServerResponses {
+            token_usage: wire
+                .send(json!({ "method": "account/usage/read", "id": 3 }))
+                .ok()
+                .and_then(|_| wire.recv_optional(3)),
+            rate_limits,
+        });
     // Kill the child before joining the reader thread so stdout reaches EOF and
     // the thread can exit; without this the exchange would hang forever.
     let _ = child.kill();
@@ -286,6 +316,24 @@ impl Wire {
                 .ok_or_else(|| kill_and(child, ProviderError::Unavailable));
         }
     }
+
+    /// Token activity is optional and unsupported by older Codex versions.
+    /// Treat any second-request failure as unavailable activity, not failure of
+    /// the already-read quota response. No provider response body is logged.
+    fn recv_optional(&self, target_id: i64) -> Option<Value> {
+        loop {
+            let line = self
+                .receiver
+                .recv_timeout(EXCHANGE_STEP_TIMEOUT)
+                .ok()?
+                .ok()?;
+            let message: Value = serde_json::from_str(&line).ok()?;
+            if message["id"].as_i64() != Some(target_id) {
+                continue;
+            }
+            return message.get("result").cloned();
+        }
+    }
 }
 
 fn kill_and(child: &mut Child, error: ProviderError) -> ProviderError {
@@ -308,6 +356,7 @@ fn classify_error(detail: &str) -> ProviderError {
 
 fn snapshot_from_response(
     response: GetAccountRateLimitsResponse,
+    token_response: Option<&GetAccountTokenUsageResponse>,
     fetched_at: DateTime<Utc>,
 ) -> Result<UsageSnapshot, ProviderError> {
     let windows = windows_from_snapshot(&response.rate_limits)?;
@@ -317,6 +366,8 @@ fn snapshot_from_response(
         .as_ref()
         .and_then(|credits| credits.balance.as_deref())
         .and_then(parse_balance);
+    let token_usage =
+        token_response.and_then(|response| token_usage_from_response(response, fetched_at));
     Ok(UsageSnapshot {
         provider_id: PROVIDER_ID.to_string(),
         display_name: DISPLAY_NAME.to_string(),
@@ -329,7 +380,7 @@ fn snapshot_from_response(
         },
         capabilities: ProviderCapabilities {
             quota_windows: true,
-            token_usage: false,
+            token_usage: token_usage.is_some(),
             account_balance: false,
             credits: true,
             cost_tracking: false,
@@ -343,8 +394,33 @@ fn snapshot_from_response(
         balance_currency: None,
         spend_estimate: None,
         model: response.rate_limits.normal_model_slug.clone(),
-        token_usage: None,
+        token_usage,
         fetched_at,
+    })
+}
+
+/// Converts provider-reported daily buckets into Ellie's explicit trailing
+/// 30-day aggregate. The provider does not report this aggregate directly, so
+/// its source is `LocallyCalculated`; the bucket data remains provider-reported.
+fn token_usage_from_response(
+    response: &GetAccountTokenUsageResponse,
+    fetched_at: DateTime<Utc>,
+) -> Option<TokenUsage> {
+    let buckets = response.daily_usage_buckets.as_ref()?;
+    let end = fetched_at.date_naive();
+    let start = end.checked_sub_signed(ChronoDuration::days(29))?;
+    let total = buckets.iter().try_fold(0_u64, |total, bucket| {
+        let day = NaiveDate::parse_from_str(&bucket.start_date, "%Y-%m-%d").ok()?;
+        let tokens = u64::try_from(bucket.tokens).ok()?;
+        if !(start..=end).contains(&day) {
+            return Some(total);
+        }
+        total.checked_add(tokens)
+    })?;
+    Some(TokenUsage {
+        total_tokens: Some(total),
+        source: MetricSource::LocallyCalculated,
+        ..TokenUsage::default()
     })
 }
 
@@ -579,7 +655,8 @@ mod tests {
 
     #[test]
     fn normalizes_sanitized_response_into_live_snapshot() {
-        let snapshot = snapshot_from_response(parse_response(), Utc::now()).expect("snapshot");
+        let snapshot =
+            snapshot_from_response(parse_response(), None, Utc::now()).expect("snapshot");
         assert_eq!(snapshot.provider_id, PROVIDER_ID);
         assert_eq!(snapshot.display_name, DISPLAY_NAME);
         assert_eq!(snapshot.plan.as_deref(), Some("plus"));
@@ -621,7 +698,7 @@ mod tests {
             }"#,
         )
         .expect("fixture");
-        let snapshot = snapshot_from_response(response, Utc::now()).expect("snapshot");
+        let snapshot = snapshot_from_response(response, None, Utc::now()).expect("snapshot");
         assert_eq!(snapshot.windows.len(), 1);
         assert_eq!(snapshot.windows[0].used_percent, Some(100.0));
         assert_eq!(snapshot.windows[0].remaining_percent, Some(0.0));
@@ -637,7 +714,7 @@ mod tests {
             r#"{"rateLimits": { "primary": { "usedPercent": 10, "windowDurationMins": 137, "resetsAt": null } } }"#,
         )
         .expect("fixture");
-        let snapshot = snapshot_from_response(response, Utc::now()).expect("snapshot");
+        let snapshot = snapshot_from_response(response, None, Utc::now()).expect("snapshot");
         assert_eq!(snapshot.windows[0].label, "Quota window (137 minutes)");
         assert_eq!(snapshot.windows.len(), 1);
     }
@@ -648,7 +725,31 @@ mod tests {
             r#"{"rateLimits": { "primary": { "usedPercent": 150, "windowDurationMins": 300, "resetsAt": null } } }"#,
         )
         .expect("fixture");
-        assert!(snapshot_from_response(response, Utc::now()).is_err());
+        assert!(snapshot_from_response(response, None, Utc::now()).is_err());
+    }
+
+    #[test]
+    fn aggregates_recent_provider_reported_token_buckets() {
+        let usage: GetAccountTokenUsageResponse = serde_json::from_str(
+            r#"{"dailyUsageBuckets":[
+                {"startDate":"2026-09-05","tokens":120},
+                {"startDate":"2026-09-06","tokens":80},
+                {"startDate":"2026-08-09","tokens":99},
+                {"startDate":"2026-08-08","tokens":1000}
+            ]}"#,
+        )
+        .expect("usage fixture");
+        let fetched_at = DateTime::from_timestamp(1_788_739_200, 0).expect("timestamp");
+        let usage = token_usage_from_response(&usage, fetched_at).expect("token activity");
+        assert_eq!(usage.total_tokens, Some(299));
+        assert_eq!(usage.request_count, None);
+        assert_eq!(usage.source, MetricSource::LocallyCalculated);
+
+        let malformed: GetAccountTokenUsageResponse = serde_json::from_str(
+            r#"{"dailyUsageBuckets":[{"startDate":"not-a-date","tokens":1}]}"#,
+        )
+        .expect("malformed fixture parses");
+        assert!(token_usage_from_response(&malformed, fetched_at).is_none());
     }
 
     #[test]
@@ -727,6 +828,10 @@ mod tests {
             !snapshot.windows.is_empty(),
             "expected at least one quota window from the live account"
         );
+        assert!(
+            snapshot.token_usage.is_some(),
+            "installed Codex CLI did not expose account/usage/read"
+        );
     }
 
     /// When run with the mock-server env var, acts as a canned codex
@@ -759,6 +864,11 @@ mod tests {
                 "account/rateLimits/read" => {
                     json!({ "id": id, "result": serde_json::from_str::<Value>(SANITIZED_RESPONSE).unwrap() })
                 }
+                "account/usage/read" => json!({ "id": id, "result": {
+                    "dailyUsageBuckets": [
+                        { "startDate": Utc::now().date_naive().to_string(), "tokens": 205 }
+                    ]
+                }}),
                 _ => {
                     json!({ "id": id, "error": { "code": -32601, "message": "Method not found" } })
                 }
@@ -791,13 +901,24 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
 
+        let token_response = reply
+            .token_usage
+            .map(serde_json::from_value)
+            .transpose()
+            .expect("structured token reply");
         let snapshot = snapshot_from_response(
-            serde_json::from_value(reply).expect("structured reply"),
+            serde_json::from_value(reply.rate_limits).expect("structured rate reply"),
+            token_response.as_ref(),
             Utc::now(),
         )
         .expect("snapshot");
         assert_eq!(snapshot.windows.len(), 2);
         assert_eq!(snapshot.windows[0].used_percent, Some(25.0));
         assert_eq!(snapshot.plan.as_deref(), Some("plus"));
+        assert!(snapshot.capabilities.token_usage);
+        assert_eq!(
+            snapshot.token_usage.and_then(|usage| usage.total_tokens),
+            Some(205)
+        );
     }
 }
