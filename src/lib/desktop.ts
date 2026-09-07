@@ -6,6 +6,7 @@ export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;
   friendlyMessages: boolean;
+  notificationsEnabled: boolean;
   hiddenProviderIds: string[];
 }
 export interface Bootstrap {
