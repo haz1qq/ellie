@@ -12,6 +12,13 @@ impl ProviderRegistry {
         self.providers.insert(provider.id().to_owned(), provider);
     }
 
+    pub fn identities(&self) -> Vec<(String, String)> {
+        self.providers
+            .values()
+            .map(|provider| (provider.id().to_owned(), provider.display_name().to_owned()))
+            .collect()
+    }
+
     pub fn capabilities(&self, id: &str) -> Option<ProviderCapabilities> {
         self.providers
             .get(id)
@@ -27,12 +34,20 @@ impl ProviderRegistry {
                     display_name: provider.display_name().to_owned(),
                     snapshot: Some(snapshot),
                     error: None,
+                    stale: false,
+                    last_successful_refresh: None,
+                    last_attempt_at: None,
+                    next_retry_at: None,
                 },
                 Err(error) => ProviderOverview {
                     provider_id: provider.id().to_owned(),
                     display_name: provider.display_name().to_owned(),
                     snapshot: None,
                     error: Some(error),
+                    stale: false,
+                    last_successful_refresh: None,
+                    last_attempt_at: None,
+                    next_retry_at: None,
                 },
             };
             results.push(overview);
@@ -48,12 +63,20 @@ impl ProviderRegistry {
                 display_name: provider.display_name().to_owned(),
                 snapshot: Some(snapshot),
                 error: None,
+                stale: false,
+                last_successful_refresh: None,
+                last_attempt_at: None,
+                next_retry_at: None,
             },
             Err(error) => ProviderOverview {
                 provider_id: provider.id().to_owned(),
                 display_name: provider.display_name().to_owned(),
                 snapshot: None,
                 error: Some(error),
+                stale: false,
+                last_successful_refresh: None,
+                last_attempt_at: None,
+                next_retry_at: None,
             },
         })
     }

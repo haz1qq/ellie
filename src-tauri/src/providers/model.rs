@@ -168,6 +168,11 @@ pub struct ProviderOverview {
     pub display_name: String,
     pub snapshot: Option<UsageSnapshot>,
     pub error: Option<ProviderError>,
+    /// A previous successful snapshot is being shown after a failed refresh.
+    pub stale: bool,
+    pub last_successful_refresh: Option<DateTime<Utc>>,
+    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub next_retry_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]

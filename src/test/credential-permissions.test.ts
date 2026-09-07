@@ -9,13 +9,15 @@ const desktop = read("src/lib/desktop.ts");
 const capability = JSON.parse(read("src-tauri/capabilities/main.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 
-// Mocked invoke calls cannot catch missing native permissions. Keep all four
-// parts of each credential IPC route aligned, without accessing any secrets.
+// Mocked invoke calls cannot catch missing native permissions. Keep all
+// parts of each native IPC route aligned, without accessing any secrets.
 describe("credential IPC permissions", () => {
   it.each([
     "save_provider_key",
     "delete_provider_key",
     "provider_key_status",
+    "refresh_all",
+    "refresh_provider",
   ])("allows %s through the native main-window boundary", (command) => {
     expect(desktop).toContain(`"${command}"`);
     expect(handler).toContain(`commands::${command}`);
@@ -38,6 +40,8 @@ describe("credential IPC permissions", () => {
       "allow-get-bootstrap",
       "allow-save-settings",
       "allow-hide-to-tray",
+      "allow-refresh-all",
+      "allow-refresh-provider",
       "allow-save-provider-key",
       "allow-delete-provider-key",
       "allow-provider-key-status",

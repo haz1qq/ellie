@@ -9,6 +9,8 @@
     "allow-get-bootstrap",
     "allow-save-settings",
     "allow-hide-to-tray",
+    "allow-refresh-all",
+    "allow-refresh-provider",
     "allow-save-provider-key",
     "allow-delete-provider-key",
     "allow-provider-key-status"

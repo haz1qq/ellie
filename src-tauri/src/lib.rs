@@ -3,6 +3,7 @@ pub mod credentials;
 pub mod error;
 pub mod history;
 pub mod providers;
+mod refresh;
 mod settings;
 mod storage;
 mod tray;
@@ -49,7 +50,9 @@ pub fn run() -> Result<(), AppError> {
                     registry.register(Arc::new(providers::MockProvider));
                     registry
                 },
+                refresh: refresh::RefreshCoordinator::default(),
             });
+            refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
             tracing::info!(event = "app_started", schema_version = 1);
@@ -59,6 +62,8 @@ pub fn run() -> Result<(), AppError> {
             commands::get_bootstrap,
             commands::save_settings,
             commands::hide_to_tray,
+            commands::refresh_all,
+            commands::refresh_provider,
             commands::save_provider_key,
             commands::delete_provider_key,
             commands::provider_key_status
