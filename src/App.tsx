@@ -352,10 +352,16 @@ export default function App() {
                   />
                   <Setting
                     label="Usage notifications"
-                    detail="Notify at 75%, 90%, and 95% of a provider-reported quota window."
+                    detail="Notify when a provider-reported quota window reaches one of the thresholds below."
                     checked={draft.notificationsEnabled}
                     onChange={(value) =>
                       setDraft({ ...draft, notificationsEnabled: value })
+                    }
+                  />
+                  <NotificationThresholds
+                    thresholds={draft.notificationThresholds}
+                    onChange={(notificationThresholds) =>
+                      setDraft({ ...draft, notificationThresholds })
                     }
                   />
                 </fieldset>
@@ -563,6 +569,47 @@ function ProviderCredentials() {
       <p className="credential-message" role="status">
         {message}
       </p>
+    </fieldset>
+  );
+}
+
+function NotificationThresholds({
+  thresholds,
+  onChange,
+}: {
+  thresholds: [number, number, number];
+  onChange: (thresholds: [number, number, number]) => void;
+}) {
+  const labels = ["First warning", "Second warning", "Final warning"];
+  return (
+    <fieldset className="notification-thresholds">
+      <legend>Warning thresholds</legend>
+      <p>Adjust the percentage used at which each notification is sent.</p>
+      {thresholds.map((value, index) => {
+        const minimum = index === 0 ? 1 : thresholds[index - 1]! + 1;
+        const maximum = index === thresholds.length - 1 ? 100 : thresholds[index + 1]! - 1;
+        return (
+          <label className="threshold-row" key={labels[index]!}>
+            <span>
+              <strong>{labels[index]!}</strong>
+              <span className="setting-detail">{value}% used</span>
+            </span>
+            <input
+              type="range"
+              min={minimum}
+              max={maximum}
+              value={value}
+              aria-label={`${labels[index]!} threshold`}
+              onChange={(event) => {
+                const next = [...thresholds] as [number, number, number];
+                next[index] = Number(event.target.value);
+                onChange(next);
+              }}
+            />
+            <output>{value}%</output>
+          </label>
+        );
+      })}
     </fieldset>
   );
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -19,7 +19,7 @@ vi.mock("./lib/desktop", () => ({
     refreshProvider: vi.fn(),
   },
 }));
-const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, notificationsEnabled: true, hiddenProviderIds: [] as string[] };
+const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, notificationsEnabled: true, notificationThresholds: [75, 90, 95] as [number, number, number], hiddenProviderIds: [] as string[] };
 const demoProviders: ProviderOverview[] = [
   {
     providerId: "ellie-demo",
@@ -203,11 +203,16 @@ describe("bootstrap shell", () => {
     await user.click(
       screen.getByRole("checkbox", { name: /Usage notifications/ }),
     );
+    fireEvent.change(
+      screen.getByRole("slider", { name: "First warning threshold" }),
+      { target: { value: "70" } },
+    );
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() =>
       expect(desktop.saveSettings).toHaveBeenLastCalledWith({
         ...initial,
         notificationsEnabled: false,
+        notificationThresholds: [70, 90, 95],
       }),
     );
   });

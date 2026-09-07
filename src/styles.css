@@ -350,7 +350,8 @@ legend {
   border-top: 1px solid var(--border);
 }
 fieldset.credentials,
-fieldset.provider-visibility {
+fieldset.provider-visibility,
+fieldset.notification-thresholds {
   margin-top: 32px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
@@ -385,10 +386,28 @@ fieldset.provider-visibility {
 .refresh-button {
   margin-left: auto;
 }
-.provider-visibility > p {
+.provider-visibility > p,
+.notification-thresholds > p {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+.threshold-row {
+  display: grid;
+  grid-template-columns: minmax(125px, 1fr) minmax(150px, 1.5fr) 42px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.threshold-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--pink);
+}
+.threshold-row output {
+  color: var(--text);
+  font-size: 13px;
+  text-align: right;
 }
 .settings-note h2 {
   font-size: 13px;
