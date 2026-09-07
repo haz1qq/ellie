@@ -351,6 +351,7 @@ function ProviderCredentials() {
   const [status, setStatus] = useState<Map<string, ProviderKeySource>>(
     new Map(),
   );
+  const [openAiAdmin, setOpenAiAdmin] = useState("");
   const [anthropic, setAnthropic] = useState("");
   const [deepseek, setDeepseek] = useState("");
   const [busy, setBusy] = useState(false);
@@ -402,6 +403,33 @@ function ProviderCredentials() {
       <p className="credential-intro">
         Keys are stored in Windows Credential Manager and never shown again.
       </p>
+      <div className="credential-row">
+        <div className="credential-info">
+          <strong>OpenAI API</strong>
+          <span>
+            Admin API key for separately billed API token usage · {" "}
+            {sourceLabel(status.get("openai-api"))}
+          </span>
+        </div>
+        <input
+          type="password"
+          value={openAiAdmin}
+          placeholder="sk-admin-…"
+          onChange={(event) => setOpenAiAdmin(event.target.value)}
+          aria-label="OpenAI Admin API key"
+        />
+        <button
+          aria-label="Save OpenAI Admin API key"
+          onClick={() =>
+            void saveKey("openai-api", openAiAdmin, () => setOpenAiAdmin(""))
+          }
+        >
+          Save
+        </button>
+        {status.get("openai-api") === "credential_manager" && (
+          <button onClick={() => void removeKey("openai-api")}>Remove</button>
+        )}
+      </div>
       <div className="credential-row">
         <div className="credential-info">
           <strong>Anthropic / Claude</strong>
@@ -458,7 +486,7 @@ function ProviderCredentials() {
       <div className="credential-row">
         <div className="credential-info">
           <strong>OpenAI / Codex</strong>
-          <span>Uses your `codex login` session; Ellie reuses it directly.</span>
+          <span>Uses your `codex login` session; Ellie reuses it directly. API billing is configured separately above.</span>
         </div>
       </div>
       <p className="credential-message" role="status">
@@ -534,7 +562,7 @@ function usageNote(providers: ProviderOverview[], visible: ProviderOverview[]) {
     return "Show hidden cards in Settings → Provider visibility. No credentials or history are deleted.";
   }
   return hasLiveData(visible)
-    ? "Live data comes from your codex CLI login on this machine; no token is stored."
+    ? "Live data comes from configured provider connections on this device. Keys remain local."
     : "No provider requests. Demo data is illustrative only.";
 }
 
@@ -647,7 +675,9 @@ function TokenSummaryCard({ snapshot }: { snapshot: UsageSnapshot }) {
         {formatCount(tokens.totalTokens)} tokens ·{" "}
         {breaksDown
           ? `${formatCount(tokens.inputTokens)} in / ${formatCount(tokens.outputTokens)} out`
-          : `${formatCount(tokens.requestCount)} requests`}
+          : tokens.requestCount != null
+            ? `${formatCount(tokens.requestCount)} requests`
+            : "daily activity"}
       </span>
       <small>
         {tokens.estimatedCostUsd !== null &&
@@ -739,9 +769,14 @@ function formatReset(
   if (!value) return "Reset unavailable";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Reset unavailable";
-  const time = date.toLocaleTimeString([], {
+  const localDateTime = date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
-  return dataKind === "mock" ? `Sample reset ${time}` : `Resets ${time}`;
+  return dataKind === "mock"
+    ? `Sample reset ${localDateTime}`
+    : `Resets ${localDateTime}`;
 }
