@@ -1,6 +1,6 @@
 # Milestone 7 — Notifications
 
-Status: implementation in progress on `feat/deepseek`.
+Status: complete on `feat/deepseek`. Native Windows smoke verification passed.
 
 ## Scope
 
@@ -32,8 +32,9 @@ providers and quota windows; per-provider rules remain deferred.
 
 Rust tests cover threshold claims, duplicate suppression, reset-period changes,
 disabled notifications, and mock-data exclusion. Frontend tests cover saving
-the notification preference. Full repository checks and native Windows smoke
-verification are required before marking this milestone complete.
+the notification preference. Full repository checks passed. Native Windows
+smoke verification confirmed notification delivery after disabling Windows Do
+Not Disturb; threshold and Settings behavior also passed.
 
 ## Deferred
 
