@@ -23,13 +23,7 @@ fn open(app: &tauri::AppHandle, settings: bool) -> tauri::Result<()> {
 
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open", "Open Ellie", true, None::<&str>)?;
-    let refresh = MenuItem::with_id(
-        app,
-        "refresh",
-        "Refresh — no providers yet",
-        false,
-        None::<&str>,
-    )?;
+    let refresh = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Ellie", true, None::<&str>)?;
@@ -45,6 +39,13 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
             let result = match event.id.as_ref() {
                 "open" => open(app, false),
                 "settings" => open(app, true),
+                "refresh" => {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::commands::refresh_all_from_app(&app_handle, true).await;
+                    });
+                    Ok(())
+                }
                 "quit" => {
                     tracing::info!(event = "quit_requested");
                     app.exit(0);

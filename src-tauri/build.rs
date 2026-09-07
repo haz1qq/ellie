@@ -4,6 +4,8 @@ fn main() {
             "get_bootstrap",
             "save_settings",
             "hide_to_tray",
+            "refresh_all",
+            "refresh_provider",
             "save_provider_key",
             "delete_provider_key",
             "provider_key_status",

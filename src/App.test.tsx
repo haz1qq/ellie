@@ -14,6 +14,9 @@ vi.mock("./lib/desktop", () => ({
     saveProviderKey: vi.fn(),
     deleteProviderKey: vi.fn(),
     providerKeyStatus: vi.fn(),
+    onProvidersUpdated: vi.fn(),
+    refreshAll: vi.fn(),
+    refreshProvider: vi.fn(),
   },
 }));
 const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, hiddenProviderIds: [] as string[] };
@@ -118,6 +121,9 @@ beforeEach(() => {
   vi.mocked(desktop.available).mockReturnValue(true);
   vi.mocked(desktop.providerKeyStatus).mockResolvedValue([]);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
+  vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
+  vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
+  vi.mocked(desktop.refreshProvider).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
     view: "dashboard",
@@ -592,6 +598,59 @@ describe("bootstrap shell", () => {
     render(<App />);
     const resets = await screen.findAllByText(/Resets/);
     expect(resets.some((element) => element.textContent?.includes("2026"))).toBe(true);
+  });
+
+  it("refreshes all providers and preserves stale data messaging", async () => {
+    const user = userEvent.setup();
+    const stale = {
+      ...demoProviders[0]!,
+      error: "unavailable" as const,
+      stale: true,
+      lastSuccessfulRefresh: new Date(Date.now() - 120_000).toISOString(),
+    };
+    vi.mocked(desktop.refreshAll).mockResolvedValue({
+      providers: [stale],
+      refreshed: true,
+      busy: false,
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Refresh now" }));
+    await waitFor(() => expect(desktop.refreshAll).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Showing data from .*refresh failed/)).toBeVisible();
+    expect(screen.getByText(/Current usage/)).toBeVisible();
+  });
+
+  it("refreshes one provider without dropping the other cards", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: [...demoProviders, ...liveProviders],
+    });
+    vi.mocked(desktop.refreshProvider).mockResolvedValue({
+      providers: [...demoProviders, ...liveProviders],
+      refreshed: true,
+      busy: false,
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Refresh OpenAI / Codex" }));
+    await waitFor(() =>
+      expect(desktop.refreshProvider).toHaveBeenCalledWith("openai-codex"),
+    );
+    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "OpenAI / Codex" })).toBeVisible();
+  });
+
+  it("accepts background provider updates without a manual refresh", async () => {
+    let update!: (providers: ProviderOverview[]) => void;
+    vi.mocked(desktop.onProvidersUpdated).mockImplementation(async (callback) => {
+      update = callback;
+      return () => {};
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Ellie Demo" });
+    update([]);
+    await waitFor(() => expect(screen.getByText("0 connected")).toBeVisible());
   });
 
   it("offers retry when settings cannot be loaded", async () => {

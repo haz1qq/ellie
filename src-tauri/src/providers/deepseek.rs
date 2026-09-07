@@ -192,6 +192,10 @@ async fn detect_state() -> DetectionResult {
     .await
     .unwrap_or(None)
     .unwrap_or(crate::credentials::KeySource::None);
+    detection_from_source(source)
+}
+
+fn detection_from_source(source: crate::credentials::KeySource) -> DetectionResult {
     match source {
         crate::credentials::KeySource::Environment | crate::credentials::KeySource::CredentialManager => {
             DetectionResult {
@@ -316,14 +320,9 @@ mod tests {
         assert_eq!(snapshot.has_subscription, None);
     }
 
-    #[tokio::test]
-    async fn detect_reports_missing_key() {
-        let previous = std::env::var("DEEPSEEK_API_KEY").ok();
-        std::env::remove_var("DEEPSEEK_API_KEY");
-        let state = detect_state().await;
-        if let Some(key) = previous {
-            std::env::set_var("DEEPSEEK_API_KEY", key);
-        }
+    #[test]
+    fn detection_reports_missing_key_without_reading_real_credentials() {
+        let state = detection_from_source(crate::credentials::KeySource::None);
         assert_eq!(state.auth_state, AuthState::AuthenticationRequired);
     }
 

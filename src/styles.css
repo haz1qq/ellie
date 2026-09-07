@@ -355,9 +355,35 @@ fieldset.provider-visibility {
   padding-top: 20px;
   border-top: 1px solid var(--border);
 }
+.provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.provider-hide,
+.provider-refresh,
+.refresh-button {
+  white-space: nowrap;
+}
+.provider-stale,
+.provider-fresh {
+  display: block;
+  font-size: 10px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.provider-stale {
+  color: #f3b7b9;
+}
+.provider-fresh {
+  color: var(--muted);
+}
 .provider-hide {
   align-self: flex-start;
-  margin-top: 12px;
+}
+.refresh-button {
+  margin-left: auto;
 }
 .provider-visibility > p {
   color: var(--muted);

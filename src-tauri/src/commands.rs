@@ -7,12 +7,12 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     error::AppError,
-    history,
-    providers::{ProviderOverview, ProviderRegistry, UsageSnapshot},
+    providers::{ProviderOverview, ProviderRegistry},
+    refresh::{RefreshCoordinator, RefreshResponse},
     settings::Settings,
     storage,
 };
@@ -23,6 +23,7 @@ pub struct AppState {
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
     pub provider_registry: ProviderRegistry,
+    pub refresh: RefreshCoordinator,
 }
 
 #[derive(Serialize)]
@@ -39,9 +40,10 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppE
     let settings = tauri::async_runtime::spawn_blocking(move || storage::read_settings(&path))
         .await
         .map_err(|_| AppError::Background)??;
-    let mut providers = state.provider_registry.refresh_all().await;
-    attach_spend_estimates(&state, &mut providers).await;
-    persist_snapshots(&state, &providers).await;
+    let refresh = state
+        .refresh
+        .refresh_all(&state.provider_registry, &state.database_path, true)
+        .await;
     Ok(Bootstrap {
         settings,
         view: if state.settings_view.load(Ordering::Relaxed) {
@@ -49,82 +51,45 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppE
         } else {
             "dashboard"
         },
-        providers,
+        providers: refresh.providers,
     })
 }
 
-/// Best-effort history write for successful refreshes. A failing write never
-/// fails bootstrap; it runs on a blocking worker, bounded by a timeout.
-async fn persist_snapshots(state: &AppState, overviews: &[ProviderOverview]) {
-    let path = state.database_path.clone();
-    let snapshots: Vec<UsageSnapshot> = overviews
-        .iter()
-        .filter_map(|overview| overview.snapshot.clone())
-        .collect();
-    let _ = tokio::time::timeout(
-        history::HISTORY_CLEANUP_TIMEOUT,
-        tauri::async_runtime::spawn_blocking(move || {
-            for snapshot in &snapshots {
-                if let Err(error) = history::insert_snapshot(&path, snapshot) {
-                    tracing::warn!(
-                        event = "history_insert_failed",
-                        provider = ?snapshot.provider_id,
-                        error = ?error
-                    );
-                }
-            }
-        }),
-    )
-    .await;
+pub async fn refresh_all_from_app(app: &AppHandle, force: bool) -> RefreshResponse {
+    let state = app.state::<AppState>();
+    let response = state
+        .refresh
+        .refresh_all(&state.provider_registry, &state.database_path, force)
+        .await;
+    emit_refresh(app, &response);
+    response
 }
 
-/// Attaches a locally-calculated spend estimate to balance-based snapshots
-/// (e.g. DeepSeek) by comparing against the oldest stored balance inside the
-/// trailing window. Best-effort: a failure only skips the estimate.
-async fn attach_spend_estimates(state: &AppState, overviews: &mut [ProviderOverview]) {
-    let path = state.database_path.clone();
-    let candidates: Vec<(String, f64, String)> = overviews
-        .iter()
-        .filter_map(|overview| {
-            let snapshot = overview.snapshot.as_ref()?;
-            Some((
-                snapshot.provider_id.clone(),
-                snapshot.balance?,
-                snapshot.balance_currency.clone()?,
-            ))
-        })
-        .collect();
-    let estimates = tauri::async_runtime::spawn_blocking(move || {
-        let mut estimates = std::collections::BTreeMap::new();
-        for (provider_id, balance, currency) in candidates {
-            match history::spend_estimate(
-                &path,
-                &provider_id,
-                balance,
-                &currency,
-                history::SPEND_ESTIMATE_WINDOW,
-            ) {
-                Ok(Some(estimate)) => {
-                    estimates.insert(provider_id, estimate);
-                }
-                Ok(None) => {}
-                Err(error) => tracing::warn!(
-                    event = "spend_estimate_failed",
-                    provider = ?provider_id,
-                    error = ?error
-                ),
-            }
+fn emit_refresh(app: &AppHandle, response: &RefreshResponse) {
+    if response.refreshed {
+        if let Err(error) = app.emit("providers-updated", &response.providers) {
+            tracing::warn!(event = "provider_update_emit_failed", error = ?error);
         }
-        estimates
-    })
-    .await
-    .unwrap_or_default();
-    for overview in overviews {
-        let Some(snapshot) = overview.snapshot.as_mut() else {
-            continue;
-        };
-        snapshot.spend_estimate = estimates.get(&snapshot.provider_id).cloned();
     }
+}
+
+#[tauri::command]
+pub async fn refresh_all(app: AppHandle) -> Result<RefreshResponse, AppError> {
+    Ok(refresh_all_from_app(&app, true).await)
+}
+
+#[tauri::command]
+pub async fn refresh_provider(
+    provider_id: String,
+    app: AppHandle,
+) -> Result<RefreshResponse, AppError> {
+    let state = app.state::<AppState>();
+    let response = state
+        .refresh
+        .refresh_one(&state.provider_registry, &state.database_path, &provider_id)
+        .await;
+    emit_refresh(&app, &response);
+    Ok(response)
 }
 
 #[tauri::command]

@@ -18,6 +18,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
   const visibleProviders = providers.filter(
@@ -32,6 +34,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
+    let unlistenProviders: (() => void) | undefined;
     if (!native) {
       setLoading(false);
       return;
@@ -48,6 +51,14 @@ export default function App() {
           return;
         }
         unlisten = stop;
+        const stopProviders = await desktop.onProvidersUpdated((next) => {
+          if (active) setProviders(next);
+        });
+        if (!active) {
+          stopProviders();
+          return;
+        }
+        unlistenProviders = stopProviders;
         const result = await desktop.bootstrap();
         if (active) {
           setSettings(result.settings);
@@ -67,8 +78,49 @@ export default function App() {
     return () => {
       active = false;
       unlisten?.();
+      unlistenProviders?.();
     };
   }, [native, retry]);
+
+  async function refreshAll() {
+    if (!native || refreshing || refreshingProvider) return;
+    setRefreshing(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await desktop.refreshAll();
+      if (result.busy) {
+        setNotice("Ellie is already refreshing. The current data is unchanged.");
+      } else {
+        setProviders(result.providers);
+        setNotice("Provider data refreshed.");
+      }
+    } catch {
+      setError("Ellie could not refresh provider data. Existing data is unchanged.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function refreshProvider(providerId: string) {
+    if (!native || refreshing || refreshingProvider) return;
+    setRefreshingProvider(providerId);
+    setError("");
+    setNotice("");
+    try {
+      const result = await desktop.refreshProvider(providerId);
+      if (result.busy) {
+        setNotice("Ellie is already refreshing. The current data is unchanged.");
+      } else {
+        setProviders(result.providers);
+        setNotice("Provider data refreshed.");
+      }
+    } catch {
+      setError("Ellie could not refresh this provider. Existing data is unchanged.");
+    } finally {
+      setRefreshingProvider(null);
+    }
+  }
 
   async function save() {
     if (!draft || saving) return;
@@ -224,6 +276,14 @@ export default function App() {
               <div className="section-heading">
                 <h2 id="providers-heading">Providers</h2>
                 <span>{providersCount(providers, visibleProviders)}</span>
+                <button
+                  type="button"
+                  className="refresh-button"
+                  onClick={() => void refreshAll()}
+                  disabled={!native || refreshing || refreshingProvider !== null}
+                >
+                  {refreshing ? "Refreshing…" : "Refresh now"}
+                </button>
               </div>
               <div className="providers">
                 {providers.length === 0 ? (
@@ -235,6 +295,9 @@ export default function App() {
                       provider={provider}
                       hideDisabled={saving || !settings || !native || !provider.providerId}
                       onHide={() => void setProviderVisibility(provider.providerId, false)}
+                      refreshDisabled={refreshing || refreshingProvider !== null || !native}
+                      refreshing={refreshingProvider === provider.providerId}
+                      onRefresh={() => void refreshProvider(provider.providerId)}
                     />
                   ))
                 )}
@@ -581,15 +644,31 @@ function ProviderUnavailable() {
   );
 }
 
-function ProviderCard({ provider, onHide, hideDisabled }: {
+function ProviderCard({
+  provider,
+  onHide,
+  hideDisabled,
+  onRefresh,
+  refreshDisabled,
+  refreshing,
+}: {
   provider: ProviderOverview;
   onHide: () => void;
   hideDisabled: boolean;
+  onRefresh: () => void;
+  refreshDisabled: boolean;
+  refreshing: boolean;
 }) {
   const hideButton = (
     <button type="button" className="provider-hide" disabled={hideDisabled}
       aria-label={`Hide ${provider.displayName}`} onClick={onHide}>
       Hide
+    </button>
+  );
+  const refreshButton = (
+    <button type="button" className="provider-refresh" disabled={refreshDisabled}
+      aria-label={`Refresh ${provider.displayName}`} onClick={onRefresh}>
+      {refreshing ? "Refreshing…" : "Refresh"}
     </button>
   );
   if (!provider.snapshot) {
@@ -603,7 +682,10 @@ function ProviderCard({ provider, onHide, hideDisabled }: {
         <span className="unavailable">
           {provider.error?.replaceAll("_", " ")}
         </span>
-        {hideButton}
+        <div className="provider-actions">
+          {refreshButton}
+          {hideButton}
+        </div>
       </article>
     );
   }
@@ -618,6 +700,7 @@ function ProviderCard({ provider, onHide, hideDisabled }: {
           <h3>{snapshot.displayName}</h3>
           {headerDetail(snapshot) && <p>{headerDetail(snapshot)}</p>}
           {snapshot.model && <p className="provider-model">Model: {snapshot.model}</p>}
+          <RefreshStatus provider={provider} />
         </div>
         {snapshot.dataKind === "mock" && (
           <span className="mock-badge">Mock data</span>
@@ -655,9 +738,30 @@ function ProviderCard({ provider, onHide, hideDisabled }: {
       {snapshot.capabilities.tokenUsage && snapshot.tokenUsage && (
         <TokenSummaryCard snapshot={snapshot} />
       )}
-      {hideButton}
+      <div className="provider-actions">
+        {refreshButton}
+        {hideButton}
+      </div>
     </article>
   );
+}
+
+function RefreshStatus({ provider }: { provider: ProviderOverview }) {
+  if (provider.stale && provider.lastSuccessfulRefresh) {
+    return (
+      <span className="provider-stale" role="status">
+        Showing data from {formatAge(provider.lastSuccessfulRefresh)}
+        {provider.error ? " · refresh failed" : ""}
+      </span>
+    );
+  }
+  if (provider.error && !provider.snapshot) {
+    return <span className="provider-stale">Refresh unavailable</span>;
+  }
+  if (provider.snapshot) {
+    return <span className="provider-fresh">Updated {formatAge(provider.snapshot.fetchedAt)} ago</span>;
+  }
+  return null;
 }
 
 function TokenSummaryCard({ snapshot }: { snapshot: UsageSnapshot }) {
@@ -746,6 +850,18 @@ function UsageWindowCard({
 
 function formatCount(value: number | null | undefined) {
   return value == null ? "—" : new Intl.NumberFormat().format(value);
+}
+function formatAge(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "an unknown time";
+  const elapsed = Math.max(0, Date.now() - date.getTime());
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"}`;
 }
 function headerDetail(snapshot: UsageSnapshot) {
   return [snapshot.accountLabel, snapshot.plan].filter(Boolean).join(" · ");

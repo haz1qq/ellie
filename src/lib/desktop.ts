@@ -77,12 +77,22 @@ export interface ProviderOverview {
     | "authentication_expired"
     | "unavailable"
     | null;
+  stale?: boolean;
+  lastSuccessfulRefresh?: string | null;
+  lastAttemptAt?: string | null;
+  nextRetryAt?: string | null;
 }
 
 export type ProviderKeySource =
   | "credential_manager"
   | "environment"
   | "none";
+export interface RefreshResponse {
+  providers: ProviderOverview[];
+  refreshed: boolean;
+  busy: boolean;
+}
+
 export interface ProviderKeyStatus {
   providerId: string;
   source: ProviderKeySource;
@@ -96,6 +106,13 @@ export const desktop = {
   hide: () => invoke<void>("hide_to_tray"),
   onNavigate: (callback: (view: View) => void) =>
     listen<View>("navigate", (event) => callback(event.payload)),
+  onProvidersUpdated: (callback: (providers: ProviderOverview[]) => void) =>
+    listen<ProviderOverview[]>("providers-updated", (event) =>
+      callback(event.payload),
+    ),
+  refreshAll: () => invoke<RefreshResponse>("refresh_all"),
+  refreshProvider: (providerId: string) =>
+    invoke<RefreshResponse>("refresh_provider", { providerId }),
   saveProviderKey: (providerId: string, key: string) =>
     invoke<void>("save_provider_key", { providerId, key }),
   deleteProviderKey: (providerId: string) =>
