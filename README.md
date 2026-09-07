@@ -22,16 +22,17 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 ## Current scope
 
 - Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
-- OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, resets, plan, credits) through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
+- OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, full local reset date/time, plan, credits) and best-effort trailing 30-day Codex token activity through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
+- OpenAI API provider: separately reads 30-day API-billed completion token activity (input/output/cached tokens, requests, dominant model) through the documented Organization Usage API. It requires an OpenAI **Admin API key** (`OPENAI_ADMIN_KEY` or Settings); it does not represent ChatGPT/Codex subscription usage. See `docs/providers/openai-api.md`.
 - Anthropic / Claude provider: reads pay-as-you-go usage and cost (30-day window) through the documented Admin API with an `ANTHROPIC_API_KEY` admin key. No subscription windows; unconfigured keys show a clear state. See `docs/providers/anthropic.md`.
 - DeepSeek provider: shows the account balance with its real currency and an
   estimated spend, via the documented `GET /user/balance` endpoint
   (`DEEPSEEK_API_KEY` or a saved key). No quota windows exist on DeepSeek, so
   none are shown. See `docs/providers/deepseek.md`.
-- Provider credentials in Settings: Anthropic and DeepSeek API keys are
+- Provider credentials in Settings: OpenAI Admin, Anthropic, and DeepSeek API keys are
   saved to Windows Credential Manager (never echoed back); Codex uses your
   `codex login` session directly. Cards show each provider's model in use,
-  and live token activity (in/out) where the provider reports it.
+  and live token activity where the provider reports it.
 - Unsubscribed **and unconfigured** providers are hidden automatically and reappear when resubscribed or configured (state derived per refresh; `hasSubscription` in snapshots; `authentication_required` errors collapse until configured). Transient failures and expired auth still show their error card.
 - **Hide** on any provider card removes only its display, including Ellie Demo. Restore it in **Settings → Provider visibility → Show … on dashboard**. Changes save immediately and survive restarts; fetching, credentials, and history are unchanged. Providers still need an active/configured account before their cards can appear.
 - Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.

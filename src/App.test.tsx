@@ -168,9 +168,13 @@ describe("bootstrap shell", () => {
     });
     expect(primary).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getAllByText("Provider-reported").length).toBe(2);
-    expect(screen.getAllByText(/Resets \d/).length).toBe(2);
     expect(
-      screen.getByText(/Live data comes from your codex CLI login/),
+      screen.getAllByText(/Resets/).filter((element) =>
+        element.textContent?.includes("2026"),
+      ),
+    ).toHaveLength(2);
+    expect(
+      screen.getByText(/Live data comes from configured provider connections/),
     ).toBeVisible();
     expect(screen.queryByText("Sample reset")).not.toBeInTheDocument();
   });
@@ -552,6 +556,42 @@ describe("bootstrap shell", () => {
     await user.click(screen.getByRole("button", { name: "Overview" }));
     expect(screen.queryByRole("heading", { name: "DeepSeek" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument();
+  });
+
+  it("stores an OpenAI Admin API key separately from Codex login", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([
+      { providerId: "openai-api", source: "none" },
+    ]);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
+    await user.type(
+      screen.getByLabelText("OpenAI Admin API key"),
+      "sk-admin-test-secret",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save OpenAI Admin API key" }),
+    );
+    await waitFor(() =>
+      expect(desktop.saveProviderKey).toHaveBeenCalledWith(
+        "openai-api",
+        "sk-admin-test-secret",
+      ),
+    );
+    expect(screen.queryByText("sk-admin-test-secret")).not.toBeInTheDocument();
+    expect(screen.getByText(/Key saved to Windows Credential Manager/)).toBeVisible();
+    expect(screen.getByText(/API billing is configured separately above/)).toBeVisible();
+  });
+
+  it("renders a complete local reset date and time", async () => {
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: liveProviders,
+    });
+    render(<App />);
+    const resets = await screen.findAllByText(/Resets/);
+    expect(resets.some((element) => element.textContent?.includes("2026"))).toBe(true);
   });
 
   it("offers retry when settings cannot be loaded", async () => {
