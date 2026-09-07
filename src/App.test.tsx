@@ -19,7 +19,7 @@ vi.mock("./lib/desktop", () => ({
     refreshProvider: vi.fn(),
   },
 }));
-const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, hiddenProviderIds: [] as string[] };
+const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, notificationsEnabled: true, hiddenProviderIds: [] as string[] };
 const demoProviders: ProviderOverview[] = [
   {
     providerId: "ellie-demo",
@@ -190,6 +190,26 @@ describe("bootstrap shell", () => {
     render(<App />);
     expect(screen.getByText(/Browser preview/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Hide to tray/ })).toBeDisabled();
+  });
+
+  it("saves the usage notification preference", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.saveSettings).mockResolvedValue({
+      ...initial,
+      notificationsEnabled: false,
+    });
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: /Usage notifications/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() =>
+      expect(desktop.saveSettings).toHaveBeenLastCalledWith({
+        ...initial,
+        notificationsEnabled: false,
+      }),
+    );
   });
 
   it("saves preferences only after success and reports failures without raw errors", async () => {

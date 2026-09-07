@@ -350,6 +350,14 @@ export default function App() {
                       setDraft({ ...draft, friendlyMessages: value })
                     }
                   />
+                  <Setting
+                    label="Usage notifications"
+                    detail="Notify at 75%, 90%, and 95% of a provider-reported quota window."
+                    checked={draft.notificationsEnabled}
+                    onChange={(value) =>
+                      setDraft({ ...draft, notificationsEnabled: value })
+                    }
+                  />
                 </fieldset>
                 <div className="save-row">
                   <button
