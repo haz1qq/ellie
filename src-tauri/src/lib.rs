@@ -2,6 +2,7 @@ mod commands;
 pub mod credentials;
 pub mod error;
 pub mod history;
+mod notifications;
 pub mod providers;
 mod refresh;
 mod settings;
@@ -23,6 +24,7 @@ pub fn run() -> Result<(), AppError> {
         .with_max_level(tracing::Level::INFO)
         .try_init();
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let database_path = app
                 .path()

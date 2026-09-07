@@ -7,8 +7,14 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub show_mascot: bool,
     pub friendly_messages: bool,
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
     #[serde(default)]
     pub hidden_provider_ids: Vec<String>,
+}
+
+fn default_notifications_enabled() -> bool {
+    true
 }
 
 impl Settings {
@@ -40,6 +46,7 @@ mod tests {
             r#"{"closeToTray":true,"showMascot":true,"friendlyMessages":true}"#,
         )
         .expect("old preferences");
+        assert!(settings.notifications_enabled);
         assert!(settings.hidden_provider_ids.is_empty());
         settings.hidden_provider_ids = vec!["ellie-demo".into()];
         assert!(settings.validate().is_ok());

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_spend_estimate.sql"),
     include_str!("../migrations/0006_model.sql"),
     include_str!("../migrations/0007_provider_visibility.sql"),
+    include_str!("../migrations/0008_notifications.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -58,9 +59,9 @@ pub fn read_settings(path: &Path) -> Result<Settings, AppError> {
 
 fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
     let (mut settings, hidden): (Settings, String) = connection.query_row(
-        "SELECT close_to_tray, show_mascot, friendly_messages, hidden_provider_ids FROM application_settings WHERE id = 1",
+        "SELECT close_to_tray, show_mascot, friendly_messages, notifications_enabled, hidden_provider_ids FROM application_settings WHERE id = 1",
         [],
-        |row| Ok((Settings { close_to_tray: row.get(0)?, show_mascot: row.get(1)?, friendly_messages: row.get(2)?, hidden_provider_ids: vec![] }, row.get(3)?)),
+        |row| Ok((Settings { close_to_tray: row.get(0)?, show_mascot: row.get(1)?, friendly_messages: row.get(2)?, notifications_enabled: row.get(3)?, hidden_provider_ids: vec![] }, row.get(4)?)),
     )?;
     settings.hidden_provider_ids = serde_json::from_str(&hidden).map_err(|_| AppError::Storage)?;
     settings.validate()?;
@@ -74,8 +75,8 @@ pub fn save_settings(path: &Path, settings: &Settings) -> Result<(), AppError> {
     let connection = connect(path)?;
     let changed = connection.execute(
         "UPDATE application_settings SET close_to_tray = ?1, show_mascot = ?2, friendly_messages = ?3,
-         hidden_provider_ids = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
-        params![settings.close_to_tray, settings.show_mascot, settings.friendly_messages, hidden],
+         notifications_enabled = ?4, hidden_provider_ids = ?5, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
+        params![settings.close_to_tray, settings.show_mascot, settings.friendly_messages, settings.notifications_enabled, hidden],
     )?;
     if changed != 1 {
         return Err(AppError::Storage);
@@ -93,11 +94,17 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let path = temp.path().join("ellie.sqlite3");
         let initial = initialize(&path)?;
-        assert!(initial.close_to_tray && initial.show_mascot && initial.friendly_messages);
+        assert!(
+            initial.close_to_tray
+                && initial.show_mascot
+                && initial.friendly_messages
+                && initial.notifications_enabled
+        );
         let changed = Settings {
             close_to_tray: false,
             show_mascot: false,
             friendly_messages: true,
+            notifications_enabled: false,
             hidden_provider_ids: vec!["ellie-demo".into()],
         };
         save_settings(&path, &changed)?;
@@ -183,6 +190,7 @@ mod tests {
         let mut settings = initialize(&path)?;
         assert!(settings.hidden_provider_ids.is_empty());
         assert!(!settings.show_mascot);
+        assert!(settings.notifications_enabled);
         use crate::providers::UsageProvider;
         let snapshot = crate::providers::MockProvider.fetch_usage().await?;
         crate::history::insert_snapshot(&path, &snapshot)?;

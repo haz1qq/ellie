@@ -35,7 +35,10 @@ pub struct Bootstrap {
 }
 
 #[tauri::command]
-pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppError> {
+pub async fn get_bootstrap(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Bootstrap, AppError> {
     let path = state.database_path.clone();
     let settings = tauri::async_runtime::spawn_blocking(move || storage::read_settings(&path))
         .await
@@ -43,6 +46,8 @@ pub async fn get_bootstrap(state: State<'_, AppState>) -> Result<Bootstrap, AppE
     let refresh = state
         .refresh
         .refresh_all(&state.provider_registry, &state.database_path, true)
+        .await;
+    crate::notifications::notify_after_refresh(&app, &state.database_path, &refresh.providers)
         .await;
     Ok(Bootstrap {
         settings,
@@ -60,6 +65,8 @@ pub async fn refresh_all_from_app(app: &AppHandle, force: bool) -> RefreshRespon
     let response = state
         .refresh
         .refresh_all(&state.provider_registry, &state.database_path, force)
+        .await;
+    crate::notifications::notify_after_refresh(app, &state.database_path, &response.providers)
         .await;
     emit_refresh(app, &response);
     response
@@ -87,6 +94,8 @@ pub async fn refresh_provider(
     let response = state
         .refresh
         .refresh_one(&state.provider_registry, &state.database_path, &provider_id)
+        .await;
+    crate::notifications::notify_after_refresh(&app, &state.database_path, &response.providers)
         .await;
     emit_refresh(&app, &response);
     Ok(response)
