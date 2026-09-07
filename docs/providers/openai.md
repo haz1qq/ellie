@@ -8,7 +8,9 @@ Ellie reads ChatGPT plan quota through the **Codex CLI's own app-server**:
 `codex app-server --stdio` speaks an MCP-like JSON-RPC 2.0 protocol over
 newline-delimited JSON (the `jsonrpc` header is omitted on the wire). Ellie
 performs the documented handshake and calls `account/rateLimits/read`, which
-returns the ChatGPT rate-limit snapshot used by the Codex CLI itself:
+returns the ChatGPT rate-limit snapshot used by the Codex CLI itself. It also
+best-effort calls `account/usage/read` for Codex's daily token-activity
+buckets:
 
 ```json
 { "method": "account/rateLimits/read", "id": 2 }
@@ -39,10 +41,10 @@ Rejected alternatives, recorded here for traceability:
   internal infrastructure, flagged by its own users as subject to change
   without notice. Not used: Ellie does not call undocumented backend
   endpoints or handle ChatGPT tokens itself.
-- **`api.openai.com` organization usage API** is documented but returns org
-  token counts by date — not the ChatGPT plan 5-hour/weekly quota, reset
-  times, or credits the product asks about. Deferred unless a need for
-  API-key org usage arises.
+- **`api.openai.com` organization usage API** returns separately billed org
+  token counts by date, not ChatGPT plan 5-hour/weekly quota, reset times, or
+  credits. Ellie now exposes it through the separate [OpenAI API billing
+  provider](openai-api.md), never by combining it with this card.
 
 ## Authentication
 
@@ -71,6 +73,7 @@ Rejected alternatives, recorded here for traceability:
 | `window.resetsAt` | `resetAt` | Unix seconds → `DateTime<Utc>`; converted to local time only for display |
 | `window.windowDurationMins` | display label | `300` → `5-hour limit`, `10080` → `Weekly limit`, `1440` → `Daily limit`, `43200` → `Monthly limit`, `525600` → `Annual limit`, else `Quota window (N minutes)` |
 | `credits.balance` | `credits` | Display string such as `"$766.76"`; parsed only when it is a numeric amount with currency/digit/separator characters, else `None` |
+| `account/usage/read.dailyUsageBuckets[].tokens` | token activity | Provider-reported daily Codex activity; Ellie sums the trailing 30 days |
 
 Hidden behind `rateLimits` (the backward-compatible single-bucket view).
 The multi-bucket `rateLimitsByLimitId`, `individualLimit`, `spendControlReached`,
@@ -90,11 +93,18 @@ The multi-bucket `rateLimitsByLimitId`, `individualLimit`, `spendControlReached`
   single window; `credits.balance` `"0"` yields `credits: 0`; missing
   fields yield `None`.
 - `data_kind` is `live`; the dashboard shows no mock labels for this card.
+- The `account/usage/read` bucket total is an explicit trailing 30-day sum,
+  so it is labeled `locally_calculated`; the source daily buckets are
+  provider-reported. It has no input/output/cached-token breakdown or API
+  billing cost, and it is not an estimate of ChatGPT quota consumption.
+- Reset timestamps remain provider-authoritative UTC instants and are rendered
+  as a full local date and time, not a time-only label.
 
 ## Limitations
 
-- Token-activity totals (`account/usage/read`) are not fetched; the provider
-  declares `token_usage: false` and `cost_tracking: false`.
+- Token activity is best-effort. Older installed Codex versions can reply
+  that `account/usage/read` is unavailable; Ellie still renders quota and
+  omits the token summary. `cost_tracking` remains `false`.
 - `account_balance` is always `false`: the only monetary surface is `credits`.
 - One app-server process is spawned per fetch (startup ~1 s); keeping a
   long-lived app-server/daemon connection is deferred to the polling

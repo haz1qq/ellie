@@ -7,8 +7,9 @@ Status: complete on `feat/openai-codex`.
 - `OpenAiProvider` (`src-tauri/src/providers/openai.rs`) reads ChatGPT plan
   quota through the Codex CLI's own `codex app-server --stdio` (MCP-like
   JSON-RPC over JSONL): `initialize` + `notifications/initialized`
-  handshake, then `account/rateLimits/read`. Registered in the registry
-  alongside the demo provider.
+  handshake, then `account/rateLimits/read` and best-effort
+  `account/usage/read`. Registered in the registry alongside the demo
+  provider and the separate OpenAI API billing provider.
 - **Authentication is reused, never handled**: the app-server resolves and
   refreshes the user's `codex login`; Ellie stores no token. `detect()`
   checks launcher presence and `~/.codex/auth.json`; `authenticate()` is
@@ -17,7 +18,9 @@ Status: complete on `feat/openai-codex`.
   `UsageWindow`s with `usedPercent` (provider-reported), `remainingPercent`
   (derived complement), `resetsAt` → UTC reset, and labels derived from
   `windowDurationMins` (5-hour / Weekly / …); `credits.balance` parsed only
-  when numeric; `accountId` → account label. `data_kind: live`.
+  when numeric; `accountId` → account label. Codex daily activity buckets
+  are summed into an explicit trailing 30-day locally-calculated aggregate.
+  `data_kind: live`.
 - Windows launch resolution: `where codex` `.exe` direct, npm `@openai/*`
   vendored native binary next to a `.cmd` shim, or `cmd /C codex` fallback
   with fixed literal args; `CREATE_NO_WINDOW`, drained stderr (never
@@ -28,14 +31,18 @@ Status: complete on `feat/openai-codex`.
 
 ## Research recorded
 
-`docs/providers/openai.md` documents the source, the rejected alternatives
-(undocumented `wham/usage`; documented platform usage API), authentication,
+`docs/providers/openai.md` documents Codex quota/activity, authentication,
 field mapping, interpretation, limitations, refresh, failures, and the
-Windows launcher resolution. Research sources included the open-source
+Windows launcher resolution. `docs/providers/openai-api.md` documents the
+separate documented Organization Usage API, Admin-key authentication, API
+billing fields, and limitations. Research sources included the open-source
 `openai/codex` repository (app-server protocol JSON schemas, `account.rs`,
 `rate_limits.rs`, login manager) and the `codex app-server` README.
 
 ## Verification
+
+The first two bullets record the original milestone-3 completion evidence.
+The later OpenAI enhancements have separate current verification below.
 
 - Offline: 26 Rust tests (8 new for this milestone) covering sanitized
   response normalization, null/missing handling, window labels, out-of-range
@@ -45,19 +52,24 @@ Windows launcher resolution. Research sources included the open-source
 - Frontend: 5 tests, including live-quota rendering with provider
   provenance and no demo labels; typecheck, lint, build pass.
 - **Live smoke (authorized local login)**: `ELLIE_LIVE_CODEX=1` provider
-  fetch completed in ~1.2 s against codex-cli 0.153.4 on this machine:
-  `planType: plus`, primary `96%` (300 min), secondary `39%` (10080 min),
-  `credits.balance "0"`, account uuid — normalized to a live snapshot with
-  two windows and persisting through the existing history pipeline.
+  fetch completed in ~1.9 s against the installed Codex CLI, with quota and
+  an `account/usage/read` token-activity result normalized into the live
+  snapshot. No token or account value was logged.
+- **OpenAI API billing**: local-server tests cover its documented response
+  shape and pagination. No real OpenAI Admin API key was available, so live
+  Organization Usage access remains owner verification.
 
 ## Automated checks
 
-- `cargo fmt --check`, `cargo clippy --all-targets --all-features`,
-  `cargo test` (26; 24 pre-existing + 2 new offline + 1 env-gated live test)
-- `npm run typecheck`, `npm run lint`, `npm test` (5), `npm run build`
+Original milestone checks were `cargo fmt --check`,
+`cargo clippy --all-targets --all-features`, `cargo test`, `npm run typecheck`,
+`npm run lint`, `npm test`, and `npm run build`. Post-milestone OpenAI
+extensions currently pass the same commands; exact run evidence is recorded
+in the implementation handoff rather than retroactively changing the original
+milestone count.
 
 ## Deferred
 
-Polling, notifications, token-activity display (`account/usage/read`), API
-key-originated org usage, reset-credit redemption, and the local API remain
-out of scope.
+Polling, notifications, reset-credit redemption, and the local API remain
+out of scope. Token activity and separately billed OpenAI API usage were
+added later as documented post-milestone enhancements.
