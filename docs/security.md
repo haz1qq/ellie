@@ -2,7 +2,7 @@
 
 Milestone 0 has no provider requests, authentication, credentials, telemetry, or local HTTP API. Vite's loopback development server is a development tool and is not part of the built application.
 
-Only the local `main` window receives capabilities. Custom commands must be registered in both the runtime handler and the build-time app manifest, then explicitly allowed by `capabilities/main.json`. The allowed commands read bootstrap data, save typed boolean settings, hide the window, save/remove provider keys, and report credential sources (never stored key values). The frontend may listen/unlisten for events; it cannot execute shell commands or access files, SQL, HTTP plugins, or stored secrets. No remote-origin capability is granted.
+Only the local `main` window receives capabilities. Custom commands must be registered in both the runtime handler and the build-time app manifest, then explicitly allowed by `capabilities/main.json`. The allowed commands read bootstrap data, save typed preferences, hide the window, refresh all or one provider, save/remove provider keys, and report credential sources (never stored key values). The frontend may listen/unlisten for events; it cannot execute shell commands or access files, SQL, HTTP plugins, or stored secrets. No remote-origin capability is granted.
 
 The credential commands were initially omitted from the manifest/capability, blocking Save, Remove, and status before the credential store was reached. The credential IPC permission regression tests check these declarations together without accessing real credentials. Native Save/Remove still require a Windows smoke check; mocked frontend calls alone do not verify native permissions.
 

@@ -35,12 +35,12 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
   and live token activity where the provider reports it.
 - Unsubscribed **and unconfigured** providers are hidden automatically and reappear when resubscribed or configured (state derived per refresh; `hasSubscription` in snapshots; `authentication_required` errors collapse until configured). Transient failures and expired auth still show their error card.
 - **Hide** on any provider card removes only its display, including Ellie Demo. Restore it in **Settings → Provider visibility → Show … on dashboard**. Changes save immediately and survive restarts; fetching, credentials, and history are unchanged. Providers still need an active/configured account before their cards can appear.
-- Rust-owned Windows tray: Open Ellie, Settings, disabled Refresh, and Quit Ellie.
+- Rust-owned Windows tray: Open Ellie, Refresh, Settings, and Quit Ellie. Refresh uses the same serialized coordinator as dashboard and background refreshes.
 - Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, notification table stubs).
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - Persisted preferences: close to tray, dashboard mascot, friendly messages, and hidden provider cards.
-- Structured JSON lifecycle logs to stdout. No credentials, telemetry, polling, notifications, or local API in this milestone.
+- Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff; notifications and the local API remain deferred.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
