@@ -1,6 +1,6 @@
 # Milestone 6 — Background polling
 
-Status: implementation in progress on `feat/deepseek`.
+Status: complete on `feat/deepseek`. Native Windows smoke verification passed.
 
 ## Implemented
 
@@ -47,8 +47,7 @@ Frontend tests cover:
 - stale-data messaging;
 - background provider update events.
 
-Full repository checks and Windows native smoke verification are required
-before marking this milestone complete. The native smoke check must confirm
+Full repository checks passed. Native Windows smoke verification confirmed
 startup refresh, dashboard Refresh, per-card Refresh, tray Refresh, and
 stale-data display after a provider failure.
 
