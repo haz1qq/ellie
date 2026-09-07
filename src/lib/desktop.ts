@@ -7,6 +7,7 @@ export interface Settings {
   showMascot: boolean;
   friendlyMessages: boolean;
   notificationsEnabled: boolean;
+  notificationThresholds: [number, number, number];
   hiddenProviderIds: string[];
 }
 export interface Bootstrap {

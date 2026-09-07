@@ -10,9 +10,6 @@ use crate::{
     storage,
 };
 
-/// Fixed initial notification thresholds from the product specification.
-pub const DEFAULT_THRESHOLDS: &[f64] = &[75.0, 90.0, 95.0];
-
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NotificationEvent {
     provider_name: String,
@@ -79,9 +76,11 @@ fn claim_notifications(
     database_path: &Path,
     providers: &[ProviderOverview],
 ) -> Result<Vec<NotificationEvent>, AppError> {
-    if !storage::read_settings(database_path)?.notifications_enabled {
+    let settings = storage::read_settings(database_path)?;
+    if !settings.notifications_enabled {
         return Ok(vec![]);
     }
+    let thresholds = settings.notification_thresholds;
 
     let mut connection = storage::connect(database_path)?;
     let transaction =
@@ -118,8 +117,8 @@ fn claim_notifications(
             let Some(period_key) = period_key(window) else {
                 continue;
             };
-            for threshold_percent in DEFAULT_THRESHOLDS {
-                if used_percent + f64::EPSILON < *threshold_percent {
+            for threshold_percent in thresholds {
+                if used_percent + f64::EPSILON < threshold_percent {
                     continue;
                 }
                 let inserted = transaction.execute(
@@ -138,7 +137,7 @@ fn claim_notifications(
                     events.push(NotificationEvent {
                         provider_name: snapshot.display_name.clone(),
                         window_label: window.label.clone(),
-                        threshold_percent: *threshold_percent,
+                        threshold_percent,
                         remaining_percent: window.remaining_percent,
                         reset_at: window.reset_at,
                     });
@@ -222,6 +221,9 @@ mod tests {
         let temp = tempfile::tempdir().map_err(|_| AppError::Storage)?;
         let path = temp.path().join("ellie.sqlite3");
         storage::initialize(&path)?;
+        let mut settings = storage::read_settings(&path)?;
+        settings.notification_thresholds = [50.0, 80.0, 95.0];
+        storage::save_settings(&path, &settings)?;
         let first_reset = Utc::now() + Duration::from_secs(3_600);
         let first = snapshot(first_reset, DataKind::Live);
         history::insert_snapshot(&path, &first)?;
@@ -229,8 +231,8 @@ mod tests {
 
         let events = claim_notifications(&path, std::slice::from_ref(&provider))?;
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].threshold_percent, 75.0);
-        assert_eq!(events[1].threshold_percent, 90.0);
+        assert_eq!(events[0].threshold_percent, 50.0);
+        assert_eq!(events[1].threshold_percent, 80.0);
         assert!(claim_notifications(&path, std::slice::from_ref(&provider))?.is_empty());
 
         let second_reset = first_reset + Duration::from_secs(7 * 24 * 60 * 60);
