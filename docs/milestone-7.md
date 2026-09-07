@@ -5,14 +5,15 @@ Status: implementation in progress on `feat/deepseek`.
 ## Scope
 
 Milestone 7 implements Windows notifications for provider-reported quota
-windows. The initial fixed thresholds are 75%, 90%, and 95% used. Settings
-provides one enable/disable control for all usage notifications; editing
-thresholds and per-provider rules remain deferred.
+windows. The initial global thresholds are 75%, 90%, and 95% used. Settings provides
+sliders for all three thresholds plus one enable/disable control shared by all
+providers and quota windows; per-provider rules remain deferred.
 
 ## Implemented
 
-- Added the `notifications_enabled` preference with a schema migration and
-  Settings toggle. Existing installations default to enabled.
+- Added the `notifications_enabled` preference and globally shared
+  `notification_thresholds` with schema migrations and Settings controls.
+  Existing installations default to enabled with 75%, 90%, and 95% thresholds.
 - Added Rust-owned Windows notification dispatch through
   `tauri-plugin-notification`; notification commands are not exposed to the
   frontend.
@@ -36,5 +37,5 @@ verification are required before marking this milestone complete.
 
 ## Deferred
 
-Threshold editing, per-provider/window notification rules, and reset
-notifications remain future enhancements. The local API remains Milestone 8.
+Per-provider/window notification rules remain a future enhancement. The local
+API remains Milestone 8.
