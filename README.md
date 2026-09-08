@@ -40,7 +40,7 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, and notification rules/state).
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - Persisted preferences: close to tray, dashboard mascot, friendly messages, and hidden provider cards.
-- Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings; the local API remains deferred.
+- Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings. A loopback local API is available on `127.0.0.1:9876` when `ELLIE_API_TOKEN` is configured.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
