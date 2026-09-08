@@ -207,7 +207,11 @@ impl RefreshCoordinator {
         }
     }
 
-    async fn cached_response(&self, registry: &ProviderRegistry, busy: bool) -> RefreshResponse {
+    pub(crate) async fn cached_response(
+        &self,
+        registry: &ProviderRegistry,
+        busy: bool,
+    ) -> RefreshResponse {
         let cache = self.cache.read().await;
         let providers = registry
             .identities()
