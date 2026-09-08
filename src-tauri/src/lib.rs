@@ -1,3 +1,4 @@
+mod api;
 mod commands;
 pub mod credentials;
 pub mod error;
@@ -54,6 +55,7 @@ pub fn run() -> Result<(), AppError> {
                 },
                 refresh: refresh::RefreshCoordinator::default(),
             });
+            api::spawn(app.handle().clone());
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;

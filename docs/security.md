@@ -14,4 +14,6 @@ Production CSP restricts scripts to bundled code and connections to Tauri IPC. D
 
 The app fails startup if storage or the tray cannot initialize, avoiding a running app hidden without a working tray. Migrations are transactional and reject newer database versions. Settings saves commit before changing native window behavior. No database-reset fallback deletes user data.
 
+The local API binds only to `127.0.0.1:9876` and requires a bearer token from the `ELLIE_API_TOKEN` process environment on every route. The token is never logged, returned by an endpoint, persisted to SQLite, or included in API errors. No permissive CORS layer is installed; browser-origin requests cannot use the API without the explicit Authorization header, and Pi must inherit/configure the same environment variable. API responses contain normalized data only and never provider credentials or raw response bodies.
+
 Logs are structured lifecycle events written to stdout. File logging and log retention are not implemented. The application does not register Windows autostart or change system settings.
