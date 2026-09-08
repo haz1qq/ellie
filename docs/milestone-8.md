@@ -1,6 +1,6 @@
 # Milestone 8 — Local API
 
-Status: implementation in progress on `feat/deepseek`.
+Status: complete on `feat/local-api`. Native API smoke verification passed.
 
 ## Scope
 
@@ -52,11 +52,11 @@ setting; users should avoid committing or broadly persisting it.
 ## Verification
 
 Rust tests cover bearer-header parsing, constant-time token comparison, and
-normalized response conversion. Native smoke verification must confirm the
-server binds to loopback, rejects missing/invalid tokens, returns health and
-usage data with a valid token, returns 404 for an unknown provider, and routes
-an authenticated POST refresh through the existing coordinator without
-exposing secrets.
+normalized response conversion. Native smoke verification passed: the server
+bound to loopback, rejected invalid tokens, returned health and usage data with
+a valid token, returned 404 for an unknown provider, and routed an
+authenticated POST refresh through the existing coordinator without exposing
+secrets.
 
 ## Deferred
 
