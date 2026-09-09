@@ -1,6 +1,6 @@
 # Milestone 10 — Windows Packaging
 
-Status: NSIS packaging configured and release artifact generated; installer install/uninstall smoke verification is pending.
+Status: NSIS packaging configured and automated install/uninstall smoke verification passed; visual/manual package verification is pending.
 
 Ellie is configured to produce a Windows NSIS installer from the existing Tauri application:
 
@@ -9,6 +9,8 @@ npm run package:windows
 ```
 
 The command runs the production frontend build, compiles the Rust application in release mode, and creates an installer under `src-tauri/target/release/bundle/nsis/`. The current build produced `Ellie_0.1.0_x64-setup.exe` (4,242,491 bytes; SHA-256 `8982be6d187488ba7ec77232e555177c1ca00ff18d91a9343be6d02b6a121498`). The generated `.exe` remains a local build artifact and is not committed.
+
+A temporary-directory Windows smoke run installed the package, launched the installed `ellie.exe` successfully, completed silent uninstall, removed the installed files after the uninstaller's cleanup delay, and confirmed the existing `%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` remained present.
 
 ## Installer policy
 
@@ -26,13 +28,16 @@ The installed executable does not require Rust, Cargo, Node.js, npm, or Python. 
 
 On a Windows machine, verify the generated installer and installed app:
 
-- installer is generated as an NSIS `.exe`
-- install completes in the current-user mode
-- Ellie launches from the installed shortcut and shows the tray icon
-- Overview, History, Settings, refresh, hide-to-tray, and quit still work
-- provider credentials and local history remain available after install/update
-- uninstall offers the expected application-data choice and preserves data by default
-- no development runtime is needed to launch the installed app
+- [x] installer is generated as an NSIS `.exe`
+- [x] install completes in the current-user mode
+- [x] the installed `ellie.exe` launches and remains running during the smoke interval
+- [x] silent uninstall completes and removes installed files after cleanup
+- [x] existing local SQLite data remains present after uninstall
+- [ ] Ellie launches from the installed shortcut and shows the tray icon
+- [ ] Overview, History, Settings, refresh, hide-to-tray, and quit still work in the installed build
+- [ ] provider credentials and local history remain available after install/update
+- [ ] uninstall's interactive application-data choice is manually confirmed
+- [ ] no development runtime is needed to launch the installed app
 
 Run the automated checks before packaging:
 

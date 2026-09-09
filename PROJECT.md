@@ -1997,7 +1997,7 @@ Provider and model distributions remain deferred until their account-specific se
 
 ## 62. Milestone 10 - Windows Packaging
 
-NSIS packaging is configured and a release installer has been generated. The remaining acceptance work is Windows install/uninstall smoke verification.
+NSIS packaging is configured and a release installer has been generated. Automated temporary-directory install/uninstall smoke verification passed; the remaining acceptance work is manual verification of shortcuts, tray behavior, and the installed UI.
 
 Target:
 
