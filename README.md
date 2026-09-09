@@ -13,6 +13,12 @@ npm install
 npm run tauri dev
 ```
 
+Build the Windows installer with:
+
+```powershell
+npm run package:windows
+```
+
 If PowerShell blocks an unsigned `npm.ps1`, use `npm.cmd` in place of `npm`; no execution-policy changes are necessary. npm is the project package manager. Commit `package-lock.json` and `src-tauri/Cargo.lock`; use `npm ci` for reproducible installs.
 
 `npm run dev` opens only the frontend server at `http://127.0.0.1:1420`. Browser preview is labeled and cannot save desktop settings or control the tray.
@@ -55,7 +61,7 @@ npm run build
 npm run check:rust
 ```
 
-See [milestone 3 verification](docs/milestone-3.md) and the [OpenAI / Codex provider notes](docs/providers/openai.md) for checks actually completed and live smoke-test status. Packaging is milestone 10; bundling is intentionally disabled.
+See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status.
 
 ## Project documentation
 

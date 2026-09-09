@@ -1997,7 +1997,7 @@ Provider and model distributions remain deferred until their account-specific se
 
 ## 62. Milestone 10 - Windows Packaging
 
-Produce a distributable Windows application.
+NSIS packaging is configured and a release installer has been generated. Automated and owner-confirmed manual Windows installer verification passed; Milestone 10 is complete.
 
 Target:
 
@@ -2011,13 +2011,13 @@ Installer:
 NSIS
 ```
 
-Potential features:
+Configured behavior:
 
-- install Ellie
-- uninstall Ellie
-- optional Start with Windows
-- shortcuts where appropriate
-- preserve local user data appropriately
+- current-user installation without requiring administrator access by default
+- Ellie Start Menu folder
+- install and uninstall through the NSIS installer
+- preserve local user data by default, with Tauri's explicit data-deletion option available during uninstall
+- existing application and tray icons reused for the packaged app
 
 The installed application must not require:
 
@@ -2029,7 +2029,7 @@ npm
 Python
 ```
 
-Those are development dependencies only.
+Those are development dependencies only. See [Milestone 10 verification](docs/milestone-10.md) for the package command and completed smoke checklist.
 
 ## 63. Ellie v0.1 Definition
 
