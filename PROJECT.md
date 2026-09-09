@@ -1997,7 +1997,7 @@ Provider and model distributions remain deferred until their account-specific se
 
 ## 62. Milestone 10 - Windows Packaging
 
-NSIS packaging is configured and a release installer has been generated. Automated temporary-directory install/uninstall smoke verification passed; the remaining acceptance work is manual verification of shortcuts, tray behavior, and the installed UI.
+NSIS packaging is configured and a release installer has been generated. Automated and owner-confirmed manual Windows installer verification passed; Milestone 10 is complete.
 
 Target:
 
@@ -2029,7 +2029,7 @@ npm
 Python
 ```
 
-Those are development dependencies only. See [Milestone 10 verification](docs/milestone-10.md) for the package command and remaining smoke checklist.
+Those are development dependencies only. See [Milestone 10 verification](docs/milestone-10.md) for the package command and completed smoke checklist.
 
 ## 63. Ellie v0.1 Definition
 
