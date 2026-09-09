@@ -1973,7 +1973,7 @@ Do not expose secrets.
 
 ## 61. Milestone 9 - Historical Analytics
 
-Dashboard ranges:
+Core analytics are implemented from local SQLite history. Dashboard ranges:
 
 ```text
 Today
@@ -1982,16 +1982,18 @@ Today
 90 days
 ```
 
-Potential analytics:
+Included:
 
-- tokens over time
-- estimated spend
-- requests
-- quota utilization
-- provider distribution
-- model distribution
+- latest token and request summaries from live provider observations
+- daily token activity over time
+- estimated spend grouped by currency, explicitly labeled as an estimate
+- latest provider-reported quota utilization
+- snapshot and provider counts
+- source metadata distinguishing provider-reported, Ellie-calculated, and mixed metrics
 
-Do not prioritize advanced analytics until quota collection is reliable.
+Analytics exclude mock snapshots and deduplicate repeated refreshes by using the latest observation per provider (and per provider/day for the trend). Today uses UTC midnight; timestamps remain UTC in storage and IPC. See [Milestone 9 verification](docs/milestone-9.md).
+
+Provider and model distributions remain deferred until their account-specific semantics are reliable and clearly explainable.
 
 ## 62. Milestone 10 - Windows Packaging
 

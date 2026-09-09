@@ -3,6 +3,9 @@ import { Cat } from "./components/Cat";
 import { copy } from "./copy";
 import {
   desktop,
+  type AnalyticsRange,
+  type AnalyticsResponse,
+  type AnalyticsSource,
   type ProviderKeySource,
   type ProviderOverview,
   type Settings,
@@ -22,6 +25,11 @@ export default function App() {
   const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [providers, setProviders] = useState<ProviderOverview[]>([]);
+  const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("sevenDays");
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [analyticsReload, setAnalyticsReload] = useState(0);
   const visibleProviders = providers.filter(
     (provider) =>
       !(settings?.hiddenProviderIds ?? []).includes(provider.providerId) &&
@@ -52,7 +60,10 @@ export default function App() {
         }
         unlisten = stop;
         const stopProviders = await desktop.onProvidersUpdated((next) => {
-          if (active) setProviders(next);
+          if (active) {
+            setProviders(next);
+            setAnalyticsReload((value) => value + 1);
+          }
         });
         if (!active) {
           stopProviders();
@@ -81,6 +92,30 @@ export default function App() {
       unlistenProviders?.();
     };
   }, [native, retry]);
+
+  useEffect(() => {
+    if (!native || view !== "history") {
+      setAnalyticsLoading(false);
+      return;
+    }
+    let active = true;
+    setAnalyticsLoading(true);
+    setAnalyticsError("");
+    void desktop
+      .getAnalytics(analyticsRange)
+      .then((result) => {
+        if (active) setAnalytics(result);
+      })
+      .catch(() => {
+        if (active) setAnalyticsError("Ellie could not load local history.");
+      })
+      .finally(() => {
+        if (active) setAnalyticsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [analyticsRange, analyticsReload, native, retry, view]);
 
   async function refreshAll() {
     if (!native || refreshing || refreshingProvider) return;
@@ -209,6 +244,13 @@ export default function App() {
           Overview
         </button>
         <button
+          className={view === "history" ? "nav-active" : ""}
+          aria-current={view === "history" ? "page" : undefined}
+          onClick={() => navigate("history")}
+        >
+          History
+        </button>
+        <button
           className={view === "settings" ? "nav-active" : ""}
           aria-current={view === "settings" ? "page" : undefined}
           onClick={() => navigate("settings")}
@@ -310,6 +352,15 @@ export default function App() {
               </button>
             </div>
           </>
+        ) : view === "history" ? (
+          <AnalyticsPanel
+            native={native}
+            range={analyticsRange}
+            analytics={analytics}
+            loading={analyticsLoading}
+            error={analyticsError}
+            onRangeChange={setAnalyticsRange}
+          />
         ) : (
           <section className="settings" aria-labelledby="settings-title">
             <p className="eyebrow">Make yourself at home</p>
@@ -697,6 +748,200 @@ function ProviderUnavailable() {
       <span className="unavailable">Not available yet</span>
     </article>
   );
+}
+
+const ANALYTICS_RANGES: Array<{ value: AnalyticsRange; label: string }> = [
+  { value: "today", label: "Today" },
+  { value: "sevenDays", label: "7 days" },
+  { value: "thirtyDays", label: "30 days" },
+  { value: "ninetyDays", label: "90 days" },
+];
+
+function AnalyticsPanel({
+  native,
+  range,
+  analytics,
+  loading,
+  error,
+  onRangeChange,
+}: {
+  native: boolean;
+  range: AnalyticsRange;
+  analytics: AnalyticsResponse | null;
+  loading: boolean;
+  error: string;
+  onRangeChange: (range: AnalyticsRange) => void;
+}) {
+  return (
+    <section className="analytics" aria-labelledby="analytics-heading">
+      <div className="section-heading analytics-heading">
+        <div>
+          <h2 id="analytics-heading">History & insights</h2>
+          <span>Local history, kept on this device</span>
+        </div>
+        <div className="analytics-ranges" role="group" aria-label="Analytics range">
+          {ANALYTICS_RANGES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={range === option.value ? "range-active" : ""}
+              aria-pressed={range === option.value}
+              disabled={!native || loading}
+              onClick={() => onRangeChange(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {!native ? (
+        <p className="analytics-empty">Open the desktop app to view local history.</p>
+      ) : loading && !analytics ? (
+        <p className="analytics-empty" role="status">Loading local history…</p>
+      ) : error ? (
+        <p className="analytics-empty" role="alert">{error}</p>
+      ) : !analytics || analytics.snapshotCount === 0 ? (
+        <p className="analytics-empty">
+          No live history in this range yet. Keep Ellie running to build a local picture.
+        </p>
+      ) : (
+        <>
+          <div className="analytics-summary">
+            <AnalyticsMetric
+              label="Latest tracked tokens"
+              value={formatCount(analytics.latestTotalTokens)}
+              detail={`Token metrics · ${analyticsSourceLabel(analytics.tokenSource)}`}
+            />
+            <AnalyticsMetric
+              label="Latest requests"
+              value={formatCount(analytics.latestRequestCount)}
+              detail={`Request metrics · ${analyticsSourceLabel(analytics.tokenSource)}`}
+            />
+            <AnalyticsMetric
+              label="Estimated spend"
+              value={
+                analytics.estimatedSpend.length === 0
+                  ? "—"
+                  : analytics.estimatedSpend
+                      .map((spend) => formatBalance(spend.amount, spend.currency))
+                      .join(" · ")
+              }
+              detail="Ellie estimate, not provider billing"
+            />
+            <AnalyticsMetric
+              label="Observed history"
+              value={formatCount(analytics.snapshotCount)}
+              detail={`${formatCount(analytics.providerCount)} live provider${analytics.providerCount === 1 ? "" : "s"}`}
+            />
+          </div>
+          <div className="analytics-grid">
+            <div className="analytics-card">
+              <h3>Token activity over time</h3>
+              <p className="analytics-card-note">
+                Daily latest observations · {analyticsSourceLabel(analytics.tokenSource).toLowerCase()}.
+              </p>
+              {analytics.tokenSeries.length === 0 ? (
+                <p className="analytics-muted">No token activity reported.</p>
+              ) : (
+                <div className="token-chart" aria-label="Token activity over time">
+                  {analytics.tokenSeries.map((point) => {
+                    const maximum = Math.max(
+                      1,
+                      ...analytics.tokenSeries.map((item) => item.totalTokens),
+                    );
+                    return (
+                      <div className="token-chart-row" key={point.date}>
+                        <span>{formatAnalyticsDate(point.date)}</span>
+                        <div className="token-chart-track">
+                          <span style={{ width: `${(point.totalTokens / maximum) * 100}%` }} />
+                        </div>
+                        <strong>{formatCount(point.totalTokens)}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="analytics-card">
+              <h3>Quota utilization</h3>
+              <p className="analytics-card-note">Latest provider-reported observation in range.</p>
+              {analytics.quotaWindows.length === 0 ? (
+                <p className="analytics-muted">No quota windows reported.</p>
+              ) : (
+                <div className="quota-analytics-list">
+                  {analytics.quotaWindows.map((window) => {
+                    const used = window.usedPercent == null
+                      ? null
+                      : Math.max(0, Math.min(100, window.usedPercent));
+                    return (
+                      <div className="quota-analytics-row" key={`${window.providerId}-${window.windowId}`}>
+                        <div>
+                          <strong>{window.displayName}</strong>
+                          <span>{window.windowLabel}</span>
+                        </div>
+                        <strong>{used == null ? "—" : `${Math.round(used)}% used`}</strong>
+                        <div
+                          className="quota-analytics-track"
+                          role="progressbar"
+                          aria-label={`${window.displayName} ${window.windowLabel}`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={used ?? undefined}
+                        >
+                          <span style={{ width: `${used ?? 0}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          <p className="analytics-footnote">
+            Analytics are calculated from fresh live snapshots. Repeated refreshes are not added together;
+            estimates and provider-reported windows retain their original meaning.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function AnalyticsMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="analytics-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function analyticsSourceLabel(source: AnalyticsSource | null) {
+  switch (source) {
+    case "provider_reported":
+      return "provider-reported";
+    case "locally_calculated":
+      return "Ellie-calculated estimate";
+    case "mixed":
+      return "mixed sources";
+    default:
+      return "source unavailable";
+  }
+}
+
+function formatAnalyticsDate(value: string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function ProviderCard({

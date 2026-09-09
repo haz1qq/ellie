@@ -8,6 +8,7 @@ vi.mock("./lib/desktop", () => ({
   desktop: {
     available: vi.fn(),
     bootstrap: vi.fn(),
+    getAnalytics: vi.fn(),
     saveSettings: vi.fn(),
     hide: vi.fn(),
     onNavigate: vi.fn(),
@@ -20,6 +21,50 @@ vi.mock("./lib/desktop", () => ({
   },
 }));
 const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, notificationsEnabled: true, notificationThresholds: [75, 90, 95] as [number, number, number], hiddenProviderIds: [] as string[] };
+const initialAnalytics = {
+  range: "sevenDays" as const,
+  startAt: "2026-09-01T00:00:00Z",
+  endAt: "2026-09-07T12:00:00Z",
+  snapshotCount: 2,
+  providerCount: 1,
+  latestTotalTokens: 1_000,
+  latestRequestCount: 3,
+  tokenSource: "locally_calculated" as const,
+  estimatedSpend: [{ currency: "USD", amount: 1.25, source: "locally_calculated" as const }],
+  providers: [{
+    providerId: "openai-codex",
+    displayName: "OpenAI / Codex",
+    model: "gpt-5",
+    latestAt: "2026-09-07T12:00:00Z",
+    totalTokens: 1_000,
+    requestCount: 3,
+    tokenSource: "locally_calculated" as const,
+  }],
+  tokenSeries: [{ date: "2026-09-07", totalTokens: 1_000 }],
+  quotaWindows: [{
+    providerId: "openai-codex",
+    displayName: "OpenAI / Codex",
+    windowId: "weekly",
+    windowLabel: "Weekly limit",
+    usedPercent: 42,
+    remainingPercent: 58,
+    observedAt: "2026-09-07T12:00:00Z",
+  }],
+};
+
+const emptyAnalytics = {
+  ...initialAnalytics,
+  snapshotCount: 0,
+  providerCount: 0,
+  latestTotalTokens: null,
+  latestRequestCount: null,
+  tokenSource: null,
+  estimatedSpend: [],
+  providers: [],
+  tokenSeries: [],
+  quotaWindows: [],
+};
+
 const demoProviders: ProviderOverview[] = [
   {
     providerId: "ellie-demo",
@@ -120,6 +165,7 @@ beforeEach(() => {
   vi.mocked(desktop.saveSettings).mockImplementation(async (settings) => settings);
   vi.mocked(desktop.available).mockReturnValue(true);
   vi.mocked(desktop.providerKeyStatus).mockResolvedValue([]);
+  vi.mocked(desktop.getAnalytics).mockResolvedValue(emptyAnalytics);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
   vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
   vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
@@ -185,11 +231,30 @@ describe("bootstrap shell", () => {
     expect(screen.queryByText("Sample reset")).not.toBeInTheDocument();
   });
 
+  it("shows local analytics and supports date ranges", async () => {
+    vi.mocked(desktop.getAnalytics).mockResolvedValue(initialAnalytics);
+    const user = userEvent.setup();
+    render(<App />);
+    expect(screen.queryByRole("heading", { name: "History & insights" })).not.toBeInTheDocument();
+    expect(desktop.getAnalytics).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByRole("heading", { name: "History & insights" })).toBeVisible();
+    expect(screen.getByText("Token activity over time")).toBeVisible();
+    expect(screen.getByText("Quota utilization")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "30 days" }));
+    await waitFor(() =>
+      expect(desktop.getAnalytics).toHaveBeenLastCalledWith("thirtyDays"),
+    );
+  });
+
   it("keeps browser preview separate from desktop settings", async () => {
+    const user = userEvent.setup();
     vi.mocked(desktop.available).mockReturnValue(false);
     render(<App />);
     expect(screen.getByText(/Browser preview/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Hide to tray/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByText("Open the desktop app to view local history.")).toBeVisible();
   });
 
   it("saves the usage notification preference", async () => {

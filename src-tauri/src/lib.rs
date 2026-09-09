@@ -1,3 +1,4 @@
+pub mod analytics;
 mod api;
 mod commands;
 pub mod credentials;
@@ -64,6 +65,7 @@ pub fn run() -> Result<(), AppError> {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
+            commands::get_analytics,
             commands::save_settings,
             commands::hide_to_tray,
             commands::refresh_all,
