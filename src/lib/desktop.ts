@@ -85,6 +85,53 @@ export interface ProviderOverview {
   nextRetryAt?: string | null;
 }
 
+export type AnalyticsRange = "today" | "sevenDays" | "thirtyDays" | "ninetyDays";
+export type AnalyticsSource =
+  | "provider_reported"
+  | "locally_calculated"
+  | "mixed";
+export interface AnalyticsSpend {
+  currency: string;
+  amount: number;
+  source: AnalyticsSource;
+}
+export interface AnalyticsProvider {
+  providerId: string;
+  displayName: string;
+  model: string | null;
+  latestAt: string;
+  totalTokens: number | null;
+  requestCount: number | null;
+  tokenSource: "provider_reported" | "locally_calculated" | null;
+}
+export interface TokenPoint {
+  date: string;
+  totalTokens: number;
+}
+export interface QuotaPoint {
+  providerId: string;
+  displayName: string;
+  windowId: string;
+  windowLabel: string;
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  observedAt: string;
+}
+export interface AnalyticsResponse {
+  range: AnalyticsRange;
+  startAt: string;
+  endAt: string;
+  snapshotCount: number;
+  providerCount: number;
+  latestTotalTokens: number | null;
+  latestRequestCount: number | null;
+  tokenSource: AnalyticsSource | null;
+  estimatedSpend: AnalyticsSpend[];
+  providers: AnalyticsProvider[];
+  tokenSeries: TokenPoint[];
+  quotaWindows: QuotaPoint[];
+}
+
 export type ProviderKeySource =
   | "credential_manager"
   | "environment"
@@ -103,6 +150,8 @@ export interface ProviderKeyStatus {
 export const desktop = {
   available: isTauri,
   bootstrap: () => invoke<Bootstrap>("get_bootstrap"),
+  getAnalytics: (range: AnalyticsRange) =>
+    invoke<AnalyticsResponse>("get_analytics", { range }),
   saveSettings: (settings: Settings) =>
     invoke<Settings>("save_settings", { settings }),
   hide: () => invoke<void>("hide_to_tray"),

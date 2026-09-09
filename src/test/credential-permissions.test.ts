@@ -38,6 +38,7 @@ describe("credential IPC permissions", () => {
       "core:event:allow-listen",
       "core:event:allow-unlisten",
       "allow-get-bootstrap",
+      "allow-get-analytics",
       "allow-save-settings",
       "allow-hide-to-tray",
       "allow-refresh-all",

@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local main window may manage preferences, hide to tray, save/remove provider keys, and read credential source status; stored secrets are never returned.",
+  "description": "Local main window may read usage analytics, manage preferences, hide to tray, save/remove provider keys, and read credential source status; stored secrets are never returned.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-get-bootstrap",
+    "allow-get-analytics",
     "allow-save-settings",
     "allow-hide-to-tray",
     "allow-refresh-all",

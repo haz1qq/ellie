@@ -6,10 +6,12 @@ use std::{
     },
 };
 
+use chrono::Utc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
+    analytics::{AnalyticsRange, AnalyticsResponse},
     error::AppError,
     providers::{ProviderOverview, ProviderRegistry},
     refresh::{RefreshCoordinator, RefreshResponse},
@@ -78,6 +80,17 @@ fn emit_refresh(app: &AppHandle, response: &RefreshResponse) {
             tracing::warn!(event = "provider_update_emit_failed", error = ?error);
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_analytics(
+    range: AnalyticsRange,
+    state: State<'_, AppState>,
+) -> Result<AnalyticsResponse, AppError> {
+    let path = state.database_path.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::analytics::query(&path, range, Utc::now()))
+        .await
+        .map_err(|_| AppError::Background)?
 }
 
 #[tauri::command]

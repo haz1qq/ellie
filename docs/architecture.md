@@ -10,6 +10,7 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
 | `src-tauri/src/credentials.rs` | Windows Credential Manager (keyring) key storage and key IPC status |
 | `src-tauri/src/history.rs` | Snapshot persistence, retrieval, and 90-day retention |
+| `src-tauri/src/analytics.rs` | Range-bounded, provenance-aware historical aggregation |
 | `src-tauri/src/refresh.rs` | Serialized refresh coordinator, cache, polling, and provider backoff |
 | `src-tauri/src/providers/` | Provider abstraction, registry, models, and adapters (mock, OpenAI/Codex, Anthropic/Claude, DeepSeek) |
 | `src-tauri/src/settings.rs` | Non-sensitive, strictly typed preferences |
@@ -32,6 +33,10 @@ Each `ProviderOverview` includes registry-owned `providerId` and `displayName` e
 Visibility is presentation-only: adapters still fetch, successful snapshots still persist, and no credentials/history are deleted. All providers, including Ellie Demo and unconfigured/failed providers, remain listed in Settings. Enabling display does not override automatic hiding for `hasSubscription === false` or `authentication_required`. No new IPC commands or permissions are needed.
 
 Temporary-database tests cover migration from schema 6, default visibility, persistence after reopening, restoration without deleting history, and invalid-input rejection. UI tests cover hide/restore, persisted preferences, failed saves/restores, in-flight disabled controls, failed-provider identity, and automatic authentication hiding. Native Windows visibility/restart smoke verification passed.
+
+## Historical analytics
+
+`get_analytics` runs the range query on a blocking worker and returns a typed, read-only `AnalyticsResponse`. `analytics.rs` excludes mock snapshots, validates stored timestamps/counters, deduplicates repeated refreshes by keeping the latest provider observation, and retains source metadata. Token/request summaries and daily token points are aggregated from the latest available live observations; spend is grouped by currency and remains explicitly estimated. Quota analytics accept only provider-reported windows. The browser preview does not invoke this command because it has no native database access.
 
 ## Dependencies
 
