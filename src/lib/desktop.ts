@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type View = "dashboard" | "settings";
+export type View = "dashboard" | "history" | "settings";
 export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;

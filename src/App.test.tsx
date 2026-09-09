@@ -235,6 +235,9 @@ describe("bootstrap shell", () => {
     vi.mocked(desktop.getAnalytics).mockResolvedValue(initialAnalytics);
     const user = userEvent.setup();
     render(<App />);
+    expect(screen.queryByRole("heading", { name: "History & insights" })).not.toBeInTheDocument();
+    expect(desktop.getAnalytics).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "History" }));
     expect(await screen.findByRole("heading", { name: "History & insights" })).toBeVisible();
     expect(screen.getByText("Token activity over time")).toBeVisible();
     expect(screen.getByText("Quota utilization")).toBeVisible();
@@ -245,10 +248,13 @@ describe("bootstrap shell", () => {
   });
 
   it("keeps browser preview separate from desktop settings", async () => {
+    const user = userEvent.setup();
     vi.mocked(desktop.available).mockReturnValue(false);
     render(<App />);
     expect(screen.getByText(/Browser preview/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Hide to tray/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByText("Open the desktop app to view local history.")).toBeVisible();
   });
 
   it("saves the usage notification preference", async () => {

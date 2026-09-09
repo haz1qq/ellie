@@ -94,8 +94,7 @@ export default function App() {
   }, [native, retry]);
 
   useEffect(() => {
-    if (!native) {
-      setAnalytics(null);
+    if (!native || view !== "history") {
       setAnalyticsLoading(false);
       return;
     }
@@ -116,7 +115,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [analyticsRange, analyticsReload, native, retry]);
+  }, [analyticsRange, analyticsReload, native, retry, view]);
 
   async function refreshAll() {
     if (!native || refreshing || refreshingProvider) return;
@@ -245,6 +244,13 @@ export default function App() {
           Overview
         </button>
         <button
+          className={view === "history" ? "nav-active" : ""}
+          aria-current={view === "history" ? "page" : undefined}
+          onClick={() => navigate("history")}
+        >
+          History
+        </button>
+        <button
           className={view === "settings" ? "nav-active" : ""}
           aria-current={view === "settings" ? "page" : undefined}
           onClick={() => navigate("settings")}
@@ -339,14 +345,6 @@ export default function App() {
                 )}
               </div>
             </section>
-            <AnalyticsPanel
-              native={native}
-              range={analyticsRange}
-              analytics={analytics}
-              loading={analyticsLoading}
-              error={analyticsError}
-              onRangeChange={setAnalyticsRange}
-            />
             <div className="bottom-note">
               <span>{usageNote(providers, visibleProviders)}</span>
               <button disabled={!native} onClick={() => void hide()}>
@@ -354,6 +352,15 @@ export default function App() {
               </button>
             </div>
           </>
+        ) : view === "history" ? (
+          <AnalyticsPanel
+            native={native}
+            range={analyticsRange}
+            analytics={analytics}
+            loading={analyticsLoading}
+            error={analyticsError}
+            onRangeChange={setAnalyticsRange}
+          />
         ) : (
           <section className="settings" aria-labelledby="settings-title">
             <p className="eyebrow">Make yourself at home</p>

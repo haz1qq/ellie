@@ -18,7 +18,7 @@ Spend and token totals are deliberately not presented as a universal billing tot
 
 ## Presentation
 
-The dashboard's **History & insights** section has compact summary cards, a token trend, quota utilization bars, range controls, empty/loading/error states, and a methodology note. It is unavailable in the browser-only preview because browser preview cannot access the native SQLite database.
+The dedicated **History** tab has compact summary cards, a token trend, quota utilization bars, range controls, empty/loading/error states, and a methodology note. It is unavailable in the browser-only preview because browser preview cannot access the native SQLite database.
 
 Advanced provider/model distributions remain deferred until their interpretation and account-specific semantics are defined.
 
