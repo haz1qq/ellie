@@ -21,7 +21,7 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 
 ## Current scope
 
-- Dark React dashboard with a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled.
+- Dark React dashboard with restrained glass surfaces, soft highlights, and pink accents across Overview, History, and Settings. Includes a static illustrative cat and optional friendly copy; live quota cards are badge-free while demo cards stay labeled. Glass is an in-app CSS treatment, not desktop-window transparency; opaque fallbacks and reduced-transparency preferences are supported. Brief tab-entry and control transitions respect reduced motion; there is no looping animation.
 - OpenAI / Codex provider: reads ChatGPT plan quota (5-hour and weekly windows, full local reset date/time, plan, credits) and best-effort trailing 30-day Codex token activity through the codex CLI's own `codex app-server` over stdio, reusing `codex login` — Ellie never stores a token. Needs the Codex CLI installed and logged in; gracefully unavailable otherwise. See `docs/providers/openai.md`.
 - OpenAI API provider: separately reads 30-day API-billed completion token activity (input/output/cached tokens, requests, dominant model) through the documented Organization Usage API. It requires an OpenAI **Admin API key** (`OPENAI_ADMIN_KEY` or Settings); it does not represent ChatGPT/Codex subscription usage. See `docs/providers/openai-api.md`.
 - Anthropic / Claude provider: reads pay-as-you-go usage and cost (30-day window) through the documented Admin API with an `ANTHROPIC_API_KEY` admin key. No subscription windows; unconfigured keys show a clear state. See `docs/providers/anthropic.md`.

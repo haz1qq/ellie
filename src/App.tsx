@@ -813,20 +813,24 @@ function AnalyticsPanel({
               detail={`Token metrics · ${analyticsSourceLabel(analytics.tokenSource)}`}
             />
             <AnalyticsMetric
-              label="Latest requests"
-              value={formatCount(analytics.latestRequestCount)}
-              detail={`Request metrics · ${analyticsSourceLabel(analytics.tokenSource)}`}
+              label="Latest request count"
+              value={analytics.latestRequestCount == null ? "Not available" : formatCount(analytics.latestRequestCount)}
+              detail={analytics.latestRequestCount == null
+                ? "No request counts in the selected history"
+                : `Request metrics · ${analyticsSourceLabel(analytics.tokenSource)}`}
             />
             <AnalyticsMetric
               label="Estimated spend"
               value={
                 analytics.estimatedSpend.length === 0
-                  ? "—"
+                  ? "Not available"
                   : analytics.estimatedSpend
                       .map((spend) => formatBalance(spend.amount, spend.currency))
                       .join(" · ")
               }
-              detail="Ellie estimate, not provider billing"
+              detail={analytics.estimatedSpend.length === 0
+                ? "No cost estimates in the selected history"
+                : "Latest estimates, not a bill for this range"}
             />
             <AnalyticsMetric
               label="Observed history"
@@ -1071,27 +1075,27 @@ function TokenSummaryCard({ snapshot }: { snapshot: UsageSnapshot }) {
     ? "Sample token activity"
     : "Token activity (last 30 days)";
   const breaksDown =
-    tokens.inputTokens !== undefined && tokens.outputTokens !== undefined;
+    tokens.inputTokens != null && tokens.outputTokens != null;
   return (
     <div className="token-summary">
       <span>{windowLabel}</span>
       <span>
-        {formatCount(tokens.totalTokens)} tokens ·{" "}
+        {tokens.totalTokens == null ? "Token total unavailable" : `${formatCount(tokens.totalTokens)} tokens`}
         {breaksDown
-          ? `${formatCount(tokens.inputTokens)} in / ${formatCount(tokens.outputTokens)} out`
+          ? ` · ${formatCount(tokens.inputTokens)} input / ${formatCount(tokens.outputTokens)} output`
           : tokens.requestCount != null
-            ? `${formatCount(tokens.requestCount)} requests`
-            : "daily activity"}
+            ? ` · ${formatCount(tokens.requestCount)} requests`
+            : ""}
       </span>
       <small>
-        {tokens.estimatedCostUsd !== null &&
+        {tokens.estimatedCostUsd != null &&
           `${formatBalance(tokens.estimatedCostUsd, "USD")} · `}
-        {tokens.cachedInputTokens !== undefined &&
+        {tokens.cachedInputTokens != null &&
           `${formatCount(tokens.cachedInputTokens)} cached input · `}
         {mock
           ? "Locally calculated sample · illustrative only"
           : tokens.source === "locally_calculated"
-            ? "Locally calculated by Ellie (window chosen and summed from provider buckets)"
+            ? "Calculated by Ellie from provider activity · not a quota"
             : "Provider-reported"}
       </small>
     </div>

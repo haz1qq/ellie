@@ -247,6 +247,35 @@ describe("bootstrap shell", () => {
     );
   });
 
+  it("omits unavailable token breakdowns", async () => {
+    const snapshot = liveProviders[0]!.snapshot!;
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial, view: "dashboard",
+      providers: [{ ...liveProviders[0]!, snapshot: {
+        ...snapshot, capabilities: { ...snapshot.capabilities, tokenUsage: true }, tokenUsage: {
+          totalTokens: 149_655_123, inputTokens: null, outputTokens: null,
+          cachedInputTokens: null, requestCount: null, estimatedCostUsd: null,
+          source: "locally_calculated",
+        },
+      } }],
+    });
+    render(<App />);
+    expect(await screen.findByText("149,655,123 tokens")).toBeVisible();
+    expect(screen.queryByText(/— in|— out|— cached input/)).not.toBeInTheDocument();
+  });
+
+  it("explains missing history metrics", async () => {
+    vi.mocked(desktop.getAnalytics).mockResolvedValue({
+      ...initialAnalytics, latestRequestCount: null, estimatedSpend: [],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("No request counts in the selected history")).toBeVisible();
+    expect(screen.getByText("No cost estimates in the selected history")).toBeVisible();
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
+  });
+
   it("keeps browser preview separate from desktop settings", async () => {
     const user = userEvent.setup();
     vi.mocked(desktop.available).mockReturnValue(false);
@@ -529,7 +558,7 @@ describe("bootstrap shell", () => {
       expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
     );
     expect(screen.getByText("Model: claude-opus-5")).toBeVisible();
-    expect(screen.getByText(/7,200 in \/ 800 out/)).toBeVisible();
+    expect(screen.getByText(/7,200 input \/ 800 output/)).toBeVisible();
     expect(screen.getByText(/1,700 cached input/)).toBeVisible();
     expect(screen.getByText("Token activity (last 30 days)")).toBeVisible();
     expect(screen.getByText(/≈ spent \(last 10 days\)/)).toBeVisible();
