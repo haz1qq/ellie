@@ -13,6 +13,21 @@ pub struct Settings {
     pub notification_thresholds: [f64; 3],
     #[serde(default)]
     pub hidden_provider_ids: Vec<String>,
+    #[serde(default)]
+    pub mini_bar_enabled: bool,
+    #[serde(default = "default_mini_bar_opacity")]
+    pub mini_bar_opacity: f64,
+    #[serde(default)]
+    pub mini_bar_x: Option<i32>,
+    #[serde(default)]
+    pub mini_bar_y: Option<i32>,
+}
+
+pub const DEFAULT_MINI_BAR_OPACITY: f64 = 0.9;
+pub const MIN_MINI_BAR_OPACITY: f64 = 0.5;
+
+fn default_mini_bar_opacity() -> f64 {
+    DEFAULT_MINI_BAR_OPACITY
 }
 
 fn default_notifications_enabled() -> bool {
@@ -27,6 +42,12 @@ fn default_notification_thresholds() -> [f64; 3] {
 
 impl Settings {
     pub fn validate(&self) -> Result<(), crate::error::AppError> {
+        if !self.mini_bar_opacity.is_finite()
+            || !(MIN_MINI_BAR_OPACITY..=1.0).contains(&self.mini_bar_opacity)
+            || self.mini_bar_x.is_some() != self.mini_bar_y.is_some()
+        {
+            return Err(crate::error::AppError::Storage);
+        }
         if !self
             .notification_thresholds
             .iter()
@@ -71,6 +92,9 @@ mod tests {
             super::DEFAULT_NOTIFICATION_THRESHOLDS
         );
         assert!(settings.hidden_provider_ids.is_empty());
+        assert!(!settings.mini_bar_enabled);
+        assert_eq!(settings.mini_bar_opacity, super::DEFAULT_MINI_BAR_OPACITY);
+        assert_eq!((settings.mini_bar_x, settings.mini_bar_y), (None, None));
         settings.hidden_provider_ids = vec!["ellie-demo".into()];
         assert!(settings.validate().is_ok());
         let json = serde_json::to_value(&settings).expect("serialize");
@@ -97,9 +121,35 @@ mod tests {
                 notifications_enabled: true,
                 notification_thresholds: thresholds,
                 hidden_provider_ids: vec![],
+                mini_bar_enabled: false,
+                mini_bar_opacity: super::DEFAULT_MINI_BAR_OPACITY,
+                mini_bar_x: None,
+                mini_bar_y: None,
             };
             assert!(settings.validate().is_err());
         }
+    }
+
+    #[test]
+    fn rejects_invalid_mini_bar_preferences() {
+        let base: Settings = serde_json::from_str(
+            r#"{"closeToTray":true,"showMascot":true,"friendlyMessages":true}"#,
+        )
+        .expect("defaults");
+        for opacity in [0.49, 1.01, f64::INFINITY, f64::NAN] {
+            let settings = Settings {
+                mini_bar_opacity: opacity,
+                ..base.clone()
+            };
+            assert!(settings.validate().is_err());
+        }
+        assert!(Settings {
+            mini_bar_x: Some(10),
+            mini_bar_y: None,
+            ..base
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

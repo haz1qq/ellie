@@ -42,11 +42,12 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 - Unsubscribed **and unconfigured** providers are hidden automatically and reappear when resubscribed or configured (state derived per refresh; `hasSubscription` in snapshots; `authentication_required` errors collapse until configured). Transient failures and expired auth still show their error card.
 - **Hide** on any provider card removes only its display, including Ellie Demo. Restore it in **Settings → Provider visibility → Show … on dashboard**. Changes save immediately and survive restarts; fetching, credentials, and history are unchanged. Providers still need an active/configured account before their cards can appear.
 - Rust-owned Windows tray: Open Ellie, Refresh, Settings, and Quit Ellie. Refresh uses the same serialized coordinator as dashboard and background refreshes.
-- Closing hides to tray by default; the Close to tray preference can disable this behavior. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
+- Closing hides to tray by default; with Close to tray disabled, closing the dashboard exits Ellie and closes auxiliary windows. Minimizing uses the normal Windows taskbar. Left-click the cat tray icon to restore the overview; right-click for its menu.
+- Optional mini floating bar: a separate always-on-top, taskbar-free window showing only live provider-reported quota remaining. It omits providers without quota windows and keeps zero, missing, unavailable, and stale states distinct. Settings controls enablement and 50–100% translucent surface opacity while labels stay opaque; dragging persists a monitor-validated local position, and clicking restores the main Overview. It reuses cached normalized data and provider update events, so opening it does not trigger provider network work.
 - Local SQLite with transactional, versioned migrations (settings, providers, accounts, snapshot history, windows, token usage, and notification rules/state).
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - **Historical analytics:** the dedicated History tab can query Today, 7-day, 30-day, and 90-day local ranges for latest token/request summaries, daily token activity, currency-grouped spend estimates, and latest provider-reported quota utilization. Mock snapshots and repeated refreshes are excluded or deduplicated, and source labels distinguish provider data from Ellie estimates. See `docs/milestone-9.md`.
-- Persisted preferences: close to tray, dashboard mascot, friendly messages, and hidden provider cards.
+- Persisted preferences: close to tray, dashboard mascot, friendly messages, hidden provider cards, and mini floating bar enablement, opacity, and position.
 - Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings. A loopback local API is available on `127.0.0.1:9876` when `ELLIE_API_TOKEN` is configured.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
@@ -61,7 +62,7 @@ npm run build
 npm run check:rust
 ```
 
-See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status.
+See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status. The mini floating bar passed owner-confirmed Windows smoke checks: always-on-top and taskbar-free behavior, 480px sizing, content visibility, dragging and restart persistence, click-to-restore, opacity, and clean exit when Close to tray is disabled.
 
 ## Project documentation
 

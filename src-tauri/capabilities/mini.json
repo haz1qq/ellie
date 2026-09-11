@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mini",
+  "description": "The local mini bar may read cached normalized quota data, listen for updates, drag itself, and restore the main dashboard. It cannot refresh providers, manage settings, or access credentials.",
+  "windows": ["mini"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-get-mini-bootstrap",
+    "allow-open-main-window"
+  ]
+}

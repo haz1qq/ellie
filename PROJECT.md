@@ -8,7 +8,7 @@ This is Ellie's product and engineering specification. It preserves the full 78-
 
 Use this file for product scope and architecture, and `AGENTS.md` for concise coding-agent instructions. Keep both aligned when requirements change.
 
-Current implementation: milestones 0–8 are complete on `feat/local-api` — live providers for OpenAI/Codex (codex app-server quota and activity), OpenAI API (Admin API completion usage), Anthropic/Claude (Admin API usage/cost), and DeepSeek (account balance), with unsubscribed/unconfigured providers hidden dynamically. The demo provider remains registered. Provider visibility persists across restarts without disabling fetching or deleting credentials/history. Milestone 6 adds five-minute background polling, dashboard/card/tray refresh controls, serialized refresh work, bounded provider backoff, and stale-snapshot preservation. Milestone 7 adds Windows quota notifications with configurable global warning thresholds (defaulting to 75%, 90%, and 95%), per-period deduplication, reset-aware state, and an enable/disable setting. Milestone 8 adds the loopback Axum API for local integrations, protected by an environment-provided bearer token. See `docs/milestone-0.md` … `docs/milestone-8.md` and `docs/providers/{openai,anthropic,deepseek}.md` for scope, sources, and verification evidence.
+Current implementation: milestones 0–8 are complete on `feat/local-api` — live providers for OpenAI/Codex (codex app-server quota and activity), OpenAI API (Admin API completion usage), Anthropic/Claude (Admin API usage/cost), and DeepSeek (account balance), with unsubscribed/unconfigured providers hidden dynamically. The demo provider remains registered. Provider visibility persists across restarts without disabling fetching or deleting credentials/history. Milestone 6 adds five-minute background polling, dashboard/card/tray refresh controls, serialized refresh work, bounded provider backoff, and stale-snapshot preservation. Milestone 7 adds Windows quota notifications with configurable global warning thresholds (defaulting to 75%, 90%, and 95%), per-period deduplication, reset-aware state, and an enable/disable setting. Milestone 8 adds the loopback Axum API for local integrations, protected by an environment-provided bearer token. The separately approved mini floating bar is implemented on `feat/mini-floating-bar`: it is optional, always on top, movable with persisted monitor-validated position, opacity-configurable, and restores the main Overview when clicked. It projects only live provider-reported remaining quota from the existing normalized cache/event stream and does not add provider network behavior. Automated checks and owner-confirmed Windows smoke tests (content visibility at 480px, always-on-top, dragging with restart persistence, click-to-restore, opacity, and clean exit/Quit) passed on the release build. See `docs/milestone-0.md` … `docs/milestone-8.md` and `docs/providers/{openai,anthropic,deepseek}.md` for scope, sources, and verification evidence.
 
 The milestones and checklists describe intended deliverables, not completed implementation. Provider fields, API responses, and Rust models are conceptual examples until verified and implemented. Actual provider capabilities must be researched during the relevant integration milestone; never treat example quotas as evidence of live support.
 
@@ -1099,25 +1099,19 @@ Do not show placeholder quota bars suggesting data exists when the provider does
 
 ## 31. Mini Floating Bar
 
-Not required for the first milestone, but the architecture should allow it later.
+The approved mini floating bar is an optional separate window. It is compact, always on top, omitted from the taskbar, draggable, and remembers a monitor-validated position. Settings controls enablement and opacity. Clicking or keyboard-activating its main surface restores and focuses Ellie's main Overview through the same native path as the tray.
+
+The bar displays numeric **remaining** quota only, with provider and full window labels. A row qualifies only when normalized data is live, the account is not explicitly unsubscribed, quota-window capability is present, and the window contains a non-null provider-reported remaining percentage. It never derives remaining from used percentage. Providers without qualifying quota windows, locally calculated metrics, hidden providers, and demo data are omitted. `0% remaining` remains visible; missing, unavailable, empty, and stale cached states use distinct explicit labels.
+
+The mini window reads the existing Rust refresh cache at bootstrap and listens to the existing provider update event. It does not call the refresh bootstrap or create another provider network/polling path. Its least-privilege Tauri capability can only read the sanitized mini bootstrap, listen/unlisten, start native dragging, and restore the main window; it cannot manage credentials/settings or trigger refreshes.
 
 Example:
 
 ```text
-┌────────────────────────────────────────────┐
-│ OAI 5h 63% W 42% │ Claude 5h 81% W 54%   │
-└────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Ellie │ OpenAI / Codex · 5-hour limit · 63% remaining       │
+└──────────────────────────────────────────────────────────────┘
 ```
-
-Potential requirements:
-
-- optional
-- always-on-top
-- movable
-- compact
-- configurable opacity
-- click to open Ellie
-- remember window position
 
 ---
 

@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -24,6 +24,7 @@ pub struct AppState {
     pub close_to_tray: Arc<AtomicBool>,
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
+    pub mini_move_generation: AtomicU64,
     pub provider_registry: ProviderRegistry,
     pub refresh: RefreshCoordinator,
 }
@@ -36,6 +37,13 @@ pub struct Bootstrap {
     providers: Vec<ProviderOverview>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiniBootstrap {
+    settings: Settings,
+    providers: Vec<ProviderOverview>,
+}
+
 #[tauri::command]
 pub async fn get_bootstrap(
     app: AppHandle,
@@ -45,12 +53,7 @@ pub async fn get_bootstrap(
     let settings = tauri::async_runtime::spawn_blocking(move || storage::read_settings(&path))
         .await
         .map_err(|_| AppError::Background)??;
-    let refresh = state
-        .refresh
-        .refresh_all(&state.provider_registry, &state.database_path, true)
-        .await;
-    crate::notifications::notify_after_refresh(&app, &state.database_path, &refresh.providers)
-        .await;
+    let refresh = refresh_all_from_app(&app, true).await;
     Ok(Bootstrap {
         settings,
         view: if state.settings_view.load(Ordering::Relaxed) {
@@ -59,6 +62,23 @@ pub async fn get_bootstrap(
             "dashboard"
         },
         providers: refresh.providers,
+    })
+}
+
+#[tauri::command]
+pub async fn get_mini_bootstrap(state: State<'_, AppState>) -> Result<MiniBootstrap, AppError> {
+    let path = state.database_path.clone();
+    let settings = tauri::async_runtime::spawn_blocking(move || storage::read_settings(&path))
+        .await
+        .map_err(|_| AppError::Background)??;
+    let providers = state
+        .refresh
+        .cached_response(&state.provider_registry, false)
+        .await
+        .providers;
+    Ok(MiniBootstrap {
+        settings,
+        providers,
     })
 }
 
@@ -116,6 +136,7 @@ pub async fn refresh_provider(
 
 #[tauri::command]
 pub async fn save_settings(
+    app: AppHandle,
     settings: Settings,
     state: State<'_, AppState>,
 ) -> Result<Settings, AppError> {
@@ -123,14 +144,27 @@ pub async fn save_settings(
     let _guard = state.settings_write.lock().await;
     let path = state.database_path.clone();
     let value = settings.clone();
-    tauri::async_runtime::spawn_blocking(move || storage::save_settings(&path, &value))
-        .await
-        .map_err(|_| AppError::Background)??;
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        storage::save_settings_preserving_position(&path, &value)
+    })
+    .await
+    .map_err(|_| AppError::Background)??;
     state
         .close_to_tray
-        .store(settings.close_to_tray, Ordering::Relaxed);
+        .store(saved.close_to_tray, Ordering::Relaxed);
+    if let Err(error) = crate::mini_bar::apply(&app, &saved) {
+        tracing::warn!(event = "mini_bar_visibility_failed", error = ?error);
+    }
+    if app.emit("mini-settings-updated", &saved).is_err() {
+        tracing::warn!(event = "mini_bar_settings_emit_failed");
+    }
     tracing::info!(event = "settings_saved");
-    Ok(settings)
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn open_main_window(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::tray::open_main(&app, false).map_err(|_| AppError::Window)
 }
 
 #[tauri::command]

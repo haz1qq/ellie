@@ -386,6 +386,39 @@ export default function App() {
                     }
                   />
                   <Setting
+                    label="Mini floating bar"
+                    detail="Keep provider-reported quota remaining visible in a separate always-on-top bar."
+                    checked={draft.miniBarEnabled}
+                    onChange={(value) =>
+                      setDraft({ ...draft, miniBarEnabled: value })
+                    }
+                  />
+                  <label className="opacity-setting">
+                    <span>
+                      <strong>Mini bar opacity</strong>
+                      <span className="setting-detail">
+                        Adjust the mini bar surface from 50% to fully opaque.
+                      </span>
+                    </span>
+                    <span className="opacity-control">
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="1"
+                        step="0.05"
+                        value={draft.miniBarOpacity}
+                        aria-label="Mini bar opacity"
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            miniBarOpacity: Number(event.target.value),
+                          })
+                        }
+                      />
+                      <output>{Math.round(draft.miniBarOpacity * 100)}%</output>
+                    </span>
+                  </label>
+                  <Setting
                     label="Show dashboard mascot"
                     detail="A little black-and-white company. Always still, never distracting."
                     checked={draft.showMascot}

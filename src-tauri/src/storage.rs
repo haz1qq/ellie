@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -17,6 +17,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_provider_visibility.sql"),
     include_str!("../migrations/0008_notifications.sql"),
     include_str!("../migrations/0009_notification_thresholds.sql"),
+    include_str!("../migrations/0010_mini_floating_bar.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -60,7 +61,10 @@ pub fn read_settings(path: &Path) -> Result<Settings, AppError> {
 
 fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
     let (mut settings, thresholds, hidden): (Settings, String, String) = connection.query_row(
-        "SELECT close_to_tray, show_mascot, friendly_messages, notifications_enabled, notification_thresholds, hidden_provider_ids FROM application_settings WHERE id = 1",
+        "SELECT close_to_tray, show_mascot, friendly_messages, notifications_enabled,
+                notification_thresholds, hidden_provider_ids, mini_bar_enabled,
+                mini_bar_opacity, mini_bar_x, mini_bar_y
+         FROM application_settings WHERE id = 1",
         [],
         |row| {
             Ok((
@@ -71,6 +75,10 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
                     notifications_enabled: row.get(3)?,
                     notification_thresholds: crate::settings::DEFAULT_NOTIFICATION_THRESHOLDS,
                     hidden_provider_ids: vec![],
+                    mini_bar_enabled: row.get(6)?,
+                    mini_bar_opacity: row.get(7)?,
+                    mini_bar_x: row.get(8)?,
+                    mini_bar_y: row.get(9)?,
                 },
                 row.get(4)?,
                 row.get(5)?,
@@ -84,16 +92,21 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
     Ok(settings)
 }
 
+#[cfg(test)]
 pub fn save_settings(path: &Path, settings: &Settings) -> Result<(), AppError> {
+    save_settings_to(&connect(path)?, settings)
+}
+
+fn save_settings_to(connection: &Connection, settings: &Settings) -> Result<(), AppError> {
     settings.validate()?;
     let thresholds =
         serde_json::to_string(&settings.notification_thresholds).map_err(|_| AppError::Storage)?;
     let hidden =
         serde_json::to_string(&settings.hidden_provider_ids).map_err(|_| AppError::Storage)?;
-    let connection = connect(path)?;
     let changed = connection.execute(
         "UPDATE application_settings SET close_to_tray = ?1, show_mascot = ?2, friendly_messages = ?3,
          notifications_enabled = ?4, notification_thresholds = ?5, hidden_provider_ids = ?6,
+         mini_bar_enabled = ?7, mini_bar_opacity = ?8, mini_bar_x = ?9, mini_bar_y = ?10,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
         params![
             settings.close_to_tray,
@@ -102,7 +115,43 @@ pub fn save_settings(path: &Path, settings: &Settings) -> Result<(), AppError> {
             settings.notifications_enabled,
             thresholds,
             hidden,
+            settings.mini_bar_enabled,
+            settings.mini_bar_opacity,
+            settings.mini_bar_x,
+            settings.mini_bar_y,
         ],
+    )?;
+    if changed != 1 {
+        return Err(AppError::Storage);
+    }
+    Ok(())
+}
+
+/// Saves user-editable preferences while retaining the latest Rust-owned
+/// window coordinates, which may have changed after the form was opened.
+pub fn save_settings_preserving_position(
+    path: &Path,
+    requested: &Settings,
+) -> Result<Settings, AppError> {
+    requested.validate()?;
+    let mut connection = connect(path)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let current = read_settings_from(&transaction)?;
+    let mut merged = requested.clone();
+    merged.mini_bar_x = current.mini_bar_x;
+    merged.mini_bar_y = current.mini_bar_y;
+    save_settings_to(&transaction, &merged)?;
+    transaction.commit()?;
+    Ok(merged)
+}
+
+pub fn save_mini_bar_position(path: &Path, x: i32, y: i32) -> Result<(), AppError> {
+    let connection = connect(path)?;
+    let changed = connection.execute(
+        "UPDATE application_settings SET mini_bar_x = ?1, mini_bar_y = ?2,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
+        params![x, y],
     )?;
     if changed != 1 {
         return Err(AppError::Storage);
@@ -135,6 +184,10 @@ mod tests {
             notifications_enabled: false,
             notification_thresholds: [60.0, 80.0, 95.0],
             hidden_provider_ids: vec!["ellie-demo".into()],
+            mini_bar_enabled: true,
+            mini_bar_opacity: 0.75,
+            mini_bar_x: Some(120),
+            mini_bar_y: Some(-40),
         };
         save_settings(&path, &changed)?;
         assert_eq!(initialize(&path)?, changed);
@@ -243,6 +296,71 @@ mod tests {
                 .get::<_, i64>(0))?,
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn schema_9_migration_adds_mini_bar_defaults_and_persists_position(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        let connection = connect(&path)?;
+        for migration in &MIGRATIONS[..9] {
+            connection.execute_batch(migration)?;
+        }
+        connection.pragma_update(None, "user_version", 9)?;
+        drop(connection);
+
+        let initial = initialize(&path)?;
+        assert!(!initial.mini_bar_enabled);
+        assert_eq!(
+            initial.mini_bar_opacity,
+            crate::settings::DEFAULT_MINI_BAR_OPACITY
+        );
+        assert_eq!((initial.mini_bar_x, initial.mini_bar_y), (None, None));
+
+        let changed = Settings {
+            mini_bar_enabled: true,
+            mini_bar_opacity: 0.55,
+            ..initial.clone()
+        };
+        save_settings(&path, &changed)?;
+        save_mini_bar_position(&path, -300, 220)?;
+        let persisted = initialize(&path)?;
+        assert!(persisted.mini_bar_enabled);
+        assert_eq!(persisted.mini_bar_opacity, 0.55);
+        assert_eq!(
+            (persisted.mini_bar_x, persisted.mini_bar_y),
+            (Some(-300), Some(220))
+        );
+
+        let stale_form = Settings {
+            mini_bar_opacity: 0.8,
+            mini_bar_x: None,
+            mini_bar_y: None,
+            ..persisted
+        };
+        let merged = save_settings_preserving_position(&path, &stale_form)?;
+        assert_eq!(
+            (merged.mini_bar_x, merged.mini_bar_y),
+            (Some(-300), Some(220))
+        );
+        assert_eq!(read_settings(&path)?, merged);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_mini_bar_write_keeps_previous_settings() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        let initial = initialize(&path)?;
+        let invalid = Settings {
+            mini_bar_opacity: 0.1,
+            mini_bar_enabled: true,
+            ..initial.clone()
+        };
+        assert!(save_settings(&path, &invalid).is_err());
+        assert_eq!(read_settings(&path)?, initial);
         Ok(())
     }
 
