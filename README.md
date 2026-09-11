@@ -62,7 +62,7 @@ npm run build
 npm run check:rust
 ```
 
-See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status. The mini floating bar still requires manual Windows verification for always-on-top behavior, dragging/restart and monitor/DPI recovery, opacity, dashboard restoration, close-to-tray, and clean Quit.
+See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status. The mini floating bar passed owner-confirmed Windows smoke checks: always-on-top and taskbar-free behavior, 480px sizing, content visibility, dragging and restart persistence, click-to-restore, opacity, and clean exit when Close to tray is disabled.
 
 ## Project documentation
 
