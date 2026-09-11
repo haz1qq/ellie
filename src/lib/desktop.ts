@@ -9,10 +9,18 @@ export interface Settings {
   notificationsEnabled: boolean;
   notificationThresholds: [number, number, number];
   hiddenProviderIds: string[];
+  miniBarEnabled: boolean;
+  miniBarOpacity: number;
+  miniBarX: number | null;
+  miniBarY: number | null;
 }
 export interface Bootstrap {
   settings: Settings;
   view: View;
+  providers: ProviderOverview[];
+}
+export interface MiniBootstrap {
+  settings: Settings;
   providers: ProviderOverview[];
 }
 
@@ -150,6 +158,8 @@ export interface ProviderKeyStatus {
 export const desktop = {
   available: isTauri,
   bootstrap: () => invoke<Bootstrap>("get_bootstrap"),
+  miniBootstrap: () => invoke<MiniBootstrap>("get_mini_bootstrap"),
+  openMainWindow: () => invoke<void>("open_main_window"),
   getAnalytics: (range: AnalyticsRange) =>
     invoke<AnalyticsResponse>("get_analytics", { range }),
   saveSettings: (settings: Settings) =>
@@ -161,6 +171,8 @@ export const desktop = {
     listen<ProviderOverview[]>("providers-updated", (event) =>
       callback(event.payload),
     ),
+  onMiniSettingsUpdated: (callback: (settings: Settings) => void) =>
+    listen<Settings>("mini-settings-updated", (event) => callback(event.payload)),
   refreshAll: () => invoke<RefreshResponse>("refresh_all"),
   refreshProvider: (providerId: string) =>
     invoke<RefreshResponse>("refresh_provider", { providerId }),

@@ -8,7 +8,7 @@ use tauri::{
 
 use crate::commands::AppState;
 
-fn open(app: &tauri::AppHandle, settings: bool) -> tauri::Result<()> {
+pub(crate) fn open_main(app: &tauri::AppHandle, settings: bool) -> tauri::Result<()> {
     app.state::<AppState>()
         .settings_view
         .store(settings, Ordering::Relaxed);
@@ -37,8 +37,8 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             let result = match event.id.as_ref() {
-                "open" => open(app, false),
-                "settings" => open(app, true),
+                "open" => open_main(app, false),
+                "settings" => open_main(app, true),
                 "refresh" => {
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -65,7 +65,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
                     button_state: MouseButtonState::Up,
                     ..
                 }
-            ) && open(tray.app_handle(), false).is_err()
+            ) && open_main(tray.app_handle(), false).is_err()
             {
                 tracing::warn!(event = "tray_open_failed");
             }

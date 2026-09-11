@@ -5,7 +5,8 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | Module | Responsibility |
 | --- | --- |
 | `src-tauri/src/lib.rs` | Logging, startup, state, close-to-tray lifecycle |
-| `src-tauri/src/tray.rs` | Native tray menu, restore/focus, settings navigation, quit |
+| `src-tauri/src/tray.rs` | Native tray menu and canonical main-window restore/focus/navigation path |
+| `src-tauri/src/mini_bar.rs` | Mini-window visibility and monitor-safe physical position restoration |
 | `src-tauri/src/commands.rs` | Typed IPC, serialized preference writes, and refresh commands |
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
 | `src-tauri/src/credentials.rs` | Windows Credential Manager (keyring) key storage and key IPC status |
@@ -16,13 +17,20 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/settings.rs` | Non-sensitive, strictly typed preferences |
 | `src-tauri/src/error.rs` | Redacted errors |
 | `src/App.tsx` | Dashboard and settings views |
+| `src/components/MiniBar.tsx`, `src/lib/miniQuota.ts` | Compact mini-window presentation and pure quota projection |
 | `src/components/Cat.tsx`, `src/copy.ts` | Static identity and optional copy |
 
 Startup initializes SQLite on a blocking worker and waits before exposing the application. Settings reads/writes run on blocking workers; writes are serialized by an async mutex. A native atomic preference controls close behavior and changes only after a successful database write. Connections have bounded busy timeouts and close after each operation.
 
-Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, and 9 adds global notification thresholds. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
+Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, 9 adds global notification thresholds, and 10 adds mini-bar enablement, opacity, and physical position. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
 
-Tray navigation sets the intended view in native state and emits a window-scoped navigation event. The frontend subscribes before reading initial state, supporting early tray interactions. Left-click restores the overview; the Settings menu opens the settings view. Refresh is enabled and routes through the same refresh coordinator as the dashboard and automatic poller.
+Tray navigation sets the intended view in native state and emits a window-scoped navigation event. The frontend subscribes before reading initial state, supporting early tray interactions. Left-click restores the overview; the Settings menu opens the settings view. The mini bar's open command uses that same main-window unminimize/show/focus/Overview helper. Refresh is enabled and routes through the same refresh coordinator as the dashboard and automatic poller. The main bootstrap also uses this shared emitting refresh path so an already-open mini window receives the completed startup data. Closing the main window hides it when close-to-tray is enabled; when disabled, Ellie exits and closes auxiliary windows rather than leaving an orphaned mini bar.
+
+## Mini floating bar
+
+The `mini` Tauri window is created hidden, transparent, undecorated, non-resizable, taskbar-free, and always on top. Its configured opacity changes the tinted surface alpha while text and status content remain opaque. At startup and after a successful Settings save, Rust applies the persisted enablement. Window move events are coalesced for 300 ms and written to SQLite on a blocking worker under the settings-write lock. Startup and re-enable restore a saved physical position only when its origin still belongs to a current monitor work area, clamp the whole bar into that work area, and otherwise recenter it. Saving editable Settings transactionally preserves the latest Rust-owned coordinates so a stale React form cannot overwrite a recent drag.
+
+`get_mini_bootstrap` reads non-sensitive settings and `RefreshCoordinator::cached_response`; unlike the main bootstrap, it performs no refresh and sends no notification. The mini React root independently listens for global normalized provider updates and projects only live, non-unsubscribed, provider-reported non-null remaining percentages from declared quota windows. It applies provider visibility, preserves `0%`, omits demo/local-only/non-quota data, and labels stale, missing, unavailable, and empty states explicitly. No provider adapter or network path depends on the mini bar.
 
 ## Provider visibility
 

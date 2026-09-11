@@ -20,7 +20,18 @@ vi.mock("./lib/desktop", () => ({
     refreshProvider: vi.fn(),
   },
 }));
-const initial = { closeToTray: true, showMascot: true, friendlyMessages: true, notificationsEnabled: true, notificationThresholds: [75, 90, 95] as [number, number, number], hiddenProviderIds: [] as string[] };
+const initial = {
+  closeToTray: true,
+  showMascot: true,
+  friendlyMessages: true,
+  notificationsEnabled: true,
+  notificationThresholds: [75, 90, 95] as [number, number, number],
+  hiddenProviderIds: [] as string[],
+  miniBarEnabled: false,
+  miniBarOpacity: 0.9,
+  miniBarX: null as number | null,
+  miniBarY: null as number | null,
+};
 const initialAnalytics = {
   range: "sevenDays" as const,
   startAt: "2026-09-01T00:00:00Z",
@@ -284,6 +295,38 @@ describe("bootstrap shell", () => {
     expect(screen.getByRole("button", { name: /Hide to tray/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(screen.getByText("Open the desktop app to view local history.")).toBeVisible();
+  });
+
+  it("saves mini bar enablement and opacity with the settings form", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("checkbox", { name: /Mini floating bar/ }));
+    fireEvent.change(
+      screen.getByRole("slider", { name: "Mini bar opacity" }),
+      { target: { value: "0.7" } },
+    );
+    expect(screen.getByText("70%")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(desktop.saveSettings).toHaveBeenLastCalledWith({
+      ...initial,
+      miniBarEnabled: true,
+      miniBarOpacity: 0.7,
+    }));
+  });
+
+  it("keeps the prior mini bar settings active after a failed save", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.saveSettings).mockRejectedValue(new Error("failed"));
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("checkbox", { name: /Mini floating bar/ }));
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your settings were not saved");
+    await user.click(screen.getByRole("button", { name: "Overview" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("checkbox", { name: /Mini floating bar/ })).toBeChecked();
+    expect(desktop.saveSettings).toHaveBeenCalledWith({ ...initial, miniBarEnabled: true });
   });
 
   it("saves the usage notification preference", async () => {

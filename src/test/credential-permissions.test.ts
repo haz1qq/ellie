@@ -7,6 +7,7 @@ const manifest = read("src-tauri/build.rs");
 const handler = read("src-tauri/src/lib.rs");
 const desktop = read("src/lib/desktop.ts");
 const capability = JSON.parse(read("src-tauri/capabilities/main.json"));
+const miniCapability = JSON.parse(read("src-tauri/capabilities/mini.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 
 // Mocked invoke calls cannot catch missing native permissions. Keep all
@@ -29,7 +30,7 @@ describe("credential IPC permissions", () => {
   });
 
   it("keeps access scoped to the local main window", () => {
-    expect(config.app.security.capabilities).toEqual(["main"]);
+    expect(config.app.security.capabilities).toEqual(["main", "mini"]);
     expect(capability.identifier).toBe("main");
     expect(capability.windows).toEqual(["main"]);
     expect(capability.remote).toBeUndefined();
@@ -47,5 +48,45 @@ describe("credential IPC permissions", () => {
       "allow-delete-provider-key",
       "allow-provider-key-status",
     ]);
+  });
+
+  it.each(["get_mini_bootstrap", "open_main_window"])(
+    "aligns the mini-only %s command across IPC declarations",
+    (command) => {
+      expect(desktop).toContain(`"${command}"`);
+      expect(handler).toContain(`commands::${command}`);
+      const commands = manifest.match(/\.commands\(&\[([\s\S]*?)\]\)/)?.[1];
+      expect(commands).toContain(`"${command}"`);
+      expect(miniCapability.permissions).toContain(
+        `allow-${command.replaceAll("_", "-")}`,
+      );
+      expect(capability.permissions).not.toContain(
+        `allow-${command.replaceAll("_", "-")}`,
+      );
+    },
+  );
+
+  it("keeps the mini bar on a least-privilege command boundary", () => {
+    expect(miniCapability.identifier).toBe("mini");
+    expect(miniCapability.windows).toEqual(["mini"]);
+    expect(miniCapability.remote).toBeUndefined();
+    expect(miniCapability.permissions).toEqual([
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
+      "core:window:allow-start-dragging",
+      "allow-get-mini-bootstrap",
+      "allow-open-main-window",
+    ]);
+    for (const forbidden of [
+      "allow-get-bootstrap",
+      "allow-save-settings",
+      "allow-refresh-all",
+      "allow-refresh-provider",
+      "allow-save-provider-key",
+      "allow-delete-provider-key",
+      "allow-provider-key-status",
+    ]) {
+      expect(miniCapability.permissions).not.toContain(forbidden);
+    }
   });
 });
