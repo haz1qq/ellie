@@ -1226,7 +1226,7 @@ Response:
 ```json
 {
   "app": "ellie",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "providers": [
     {
       "id": "openai",
@@ -1290,16 +1290,20 @@ This keeps authentication and provider logic centralized inside Ellie.
 
 A future CLI should use the same Ellie core.
 
+The tray app owns the `ellie` executable name (`ellie.exe`); a second binary
+cannot share it (Cargo duplicate-binary-name error), so the CLI ships as
+`ellie-cli`.
+
 Executable:
 
 ```text
-ellie
+ellie-cli
 ```
 
 Example:
 
 ```powershell
-ellie status
+ellie-cli status
 ```
 
 Output:
@@ -1322,16 +1326,18 @@ DeepSeek
 Possible future commands:
 
 ```text
-ellie status
-ellie refresh
-ellie providers
-ellie history
-ellie version
+ellie-cli status
+ellie-cli refresh
+ellie-cli providers
+ellie-cli history
+ellie-cli version
 ```
 
 The CLI is not required for v0.1.
 
 Implementation decision (2026, `feat/cli`): build **Route B first** — a thin second Cargo binary in `src-tauri` that consumes the existing local REST API (`127.0.0.1:9876/api/v1`) with the `ELLIE_API_TOKEN` bearer token, starting with `status`, `refresh`, and `version`. It never touches credentials, SQLite, or core internals, mirrors the Pi-extension contract, and requires the tray app running with the token set. Direct-core reuse (Route A, works with Ellie closed) remains a possible follow-up.
+
+Status (2026, `feat/cli`): Route B is **implemented** as the explicit Cargo bin `ellie-cli` (`src-tauri/src/bin/ellie_cli.rs`, `[[bin]] name = "ellie-cli"`), keeping `ellie.exe` as Cargo's default GUI target. `status` prints §38-shaped per-provider reports using the API's real display names and window labels, with chrono-computed reset countdowns from `resetAt`, DeepSeek-style balance rows, provenance labels (`(Ellie estimate)` for locally calculated windows), and explicit stale/unavailable/empty handling; mock (demo) and never-fetched providers are omitted, with an explicit report-level message when nothing remains. `refresh` posts to `/api/v1/refresh` and prints the updated report (or notes a busy refresh); its six-minute request deadline covers the coordinator's bounded sequential provider work while status retains a 30-second deadline. `version` prints `CARGO_PKG_VERSION`; `help`/no-args print usage. Errors are redacted to friendly copy with documented exit codes; the token and raw bodies are never printed, and automatic system/environment proxy routing is disabled so the fixed loopback bearer request cannot be delegated to a proxy (see `docs/cli.md`). Automated checks passed: `cargo fmt`, clippy `--all-targets --all-features -D warnings`, and `cargo test` (73 library tests plus 29 `ellie-cli` tests including tiny mock HTTP servers covering GET/POST success, proxy bypass, refresh deadlines, 401/403/503/malformed-body/connection-refused paths). A live `status`/`refresh` against a running app with a real token is still a manual Windows smoke check; installer inclusion of the CLI is deferred to Milestone 10.
 
 ## 39. Project Structure
 

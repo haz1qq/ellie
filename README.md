@@ -49,6 +49,7 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 - **Historical analytics:** the dedicated History tab can query Today, 7-day, 30-day, and 90-day local ranges for latest token/request summaries, daily token activity, currency-grouped spend estimates, and latest provider-reported quota utilization. Mock snapshots and repeated refreshes are excluded or deduplicated, and source labels distinguish provider data from Ellie estimates. See `docs/milestone-9.md`.
 - Persisted preferences: close to tray, dashboard mascot, friendly messages, hidden provider cards, and mini floating bar enablement, opacity, and position.
 - Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings. A loopback local API is available on `127.0.0.1:9876` when `ELLIE_API_TOKEN` is configured.
+- `ellie-cli` command-line interface: `status`, `refresh`, and `version` consumed through the loopback local API with the `ELLIE_API_TOKEN` bearer token. It requires the tray app running with the token set, never prints credentials or raw API bodies, and maps failures to documented exit codes. The tray app keeps the `ellie.exe` name; the CLI ships as `ellie-cli`. See `docs/cli.md`.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
@@ -62,7 +63,7 @@ npm run build
 npm run check:rust
 ```
 
-See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status. The mini floating bar passed owner-confirmed Windows smoke checks: always-on-top and taskbar-free behavior, 480px sizing, content visibility, dragging and restart persistence, click-to-restore, opacity, and clean exit when Close to tray is disabled.
+See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](docs/milestone-9.md), and [Milestone 10 packaging](docs/milestone-10.md) for checks actually completed and live smoke-test status. The mini floating bar passed owner-confirmed Windows smoke checks: always-on-top and taskbar-free behavior, 480px sizing, content visibility, dragging and restart persistence, click-to-restore, opacity, and clean exit when Close to tray is disabled. The `ellie-cli` binary is covered by the same `npm run check:rust` flow — fmt, clippy `--all-targets --all-features -D warnings`, and `cargo test` (including 29 `ellie-cli` unit/mock-server tests). A live `ellie-cli status`/`refresh` against a running app with a real token still needs a manual Windows smoke check.
 
 ## Project documentation
 
