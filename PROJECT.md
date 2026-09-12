@@ -1331,6 +1331,8 @@ ellie version
 
 The CLI is not required for v0.1.
 
+Implementation decision (2026, `feat/cli`): build **Route B first** — a thin second Cargo binary in `src-tauri` that consumes the existing local REST API (`127.0.0.1:9876/api/v1`) with the `ELLIE_API_TOKEN` bearer token, starting with `status`, `refresh`, and `version`. It never touches credentials, SQLite, or core internals, mirrors the Pi-extension contract, and requires the tray app running with the token set. Direct-core reuse (Route A, works with Ellie closed) remains a possible follow-up.
+
 ## 39. Project Structure
 
 Initial recommended structure:
