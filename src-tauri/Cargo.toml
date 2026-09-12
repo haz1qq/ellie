@@ -1,13 +1,20 @@
 [package]
 name = "ellie"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local-first AI usage companion"
 edition = "2021"
 rust-version = "1.88"
+default-run = "ellie"
 
 [lib]
 name = "ellie_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Route B CLI: a thin second binary that consumes the loopback local API.
+# The GUI keeps the `ellie` executable name; the CLI is `ellie-cli`.
+[[bin]]
+name = "ellie-cli"
+path = "src/bin/ellie_cli.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

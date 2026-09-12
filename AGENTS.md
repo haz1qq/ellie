@@ -59,6 +59,14 @@
 - Defer floating bars, charts, extra providers, and other future features until scheduled. Do not let optional features block the active milestone.
 - Mark completion only when acceptance criteria and relevant checks pass. Record unresolved integration questions and blockers accurately.
 
+## Versioning and releases
+- Track Semantic Versioning (`MAJOR.MINOR.PATCH`). While version < 1.0.0, breaking changes bump the minor; from 1.0.0 onward they bump the major.
+- `PATCH` fixes regressions without behavior or contract changes; `MINOR` adds backward-compatible features; breaking changes use a major (or a 0.x minor).
+- Ellie's consumer-facing contract is the versioned local API (`/api/v1`), the SQLite schema with migrations, and the installer identity. Prefer additive releases; for breaking API changes, add a new versioned route and keep the old one rather than editing it.
+- Keep `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` versions in lockstep, plus any expressed API version, before any release build.
+- `1.0.0` is a compatibility commitment, not a feature threshold: declare it only when the feature set is stable and the versioned contract is locked, and document the release in `PROJECT.md`/`README.md`.
+- Record release checks exactly as run; never claim smoke tests that were not executed.
+
 ## Testing and handoff
 - Use repository-defined scripts. Milestone completion requires `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` against the correct manifest, plus configured TypeScript, frontend lint, and relevant test/build checks with npm. Do not claim nonexistent scripts ran.
 - Test normalization with sanitized fixtures: absent versus zero, mixed provenance, invalid values, multiple windows, reset boundaries, timezone display, and account-specific capabilities.
