@@ -14,8 +14,62 @@ Production CSP restricts scripts to bundled code and connections to Tauri IPC. D
 
 The app fails startup if storage or the tray cannot initialize, avoiding a running app hidden without a working tray. Migrations are transactional and reject newer database versions. Settings saves commit before changing native window behavior. No database-reset fallback deletes user data.
 
-The local API binds only to `127.0.0.1:9876` and requires a bearer token from the `ELLIE_API_TOKEN` process environment on every route. The token is never logged, returned by an endpoint, persisted to SQLite, or included in API errors. No permissive CORS layer is installed; browser-origin requests cannot use the API without the explicit Authorization header, and Pi must inherit/configure the same environment variable. API responses contain normalized data only and never provider credentials or raw response bodies.
+## Local API authentication (0.3.0)
 
-The `ellie-cli` binary is a consumer of this same contract: it sends the token only in the `Authorization: Bearer` header, disables reqwest's automatic system/environment proxy routing so the loopback request and token cannot be delegated to a configured proxy, never logs or prints the token, and maps HTTP and transport failures to redacted static friendly copy with documented exit codes — it never prints raw response bodies, API error bodies, or credential-shaped data. It targets the fixed loopback URL and requires the running app's token in `ELLIE_API_TOKEN`. See `docs/cli.md`.
+The API is explicitly opt-in: migration 11 adds `local_api_enabled = 0` for fresh
+installs and upgrades. The persisted setting wins over `ELLIE_API_TOKEN`. Disabled
+startup does not bind a socket or read the credential store. Only the main window
+may invoke `local_api_status` or `configure_local_api` (typed enable/disable/rotate);
+both also enforce the `main` window label in Rust. Generic settings cannot set
+API enablement. Neither command accepts or returns a token. The mini capability
+has no new permissions and cannot control authentication.
+
+Enabling reserves `127.0.0.1:9876`, resolves authentication, commits enablement,
+then authorizes requests. Without an override, a missing token is generated from
+32 OS-random bytes (`getrandom`) and stored only in Windows Credential Manager
+using the existing keyring Windows backend (`ellie` / `local_api_token`). No
+provider credential account is reused. Restart never silently replaces a missing
+or unreadable token. Credential-store and persistence failures are redacted and
+fail closed. In-memory authentication is not Debug/Serialize; only four status
+fields cross IPC: enabled preference, listening, token source, and static error.
+
+`ELLIE_API_TOKEN` is an explicit process override, not an enable switch. The shared
+Rust resolver checks it before touching the store. Empty/non-Unicode, whitespace,
+non-visible-ASCII, or over-512-byte overrides are rejected without fallback;
+syntactically valid but mismatched overrides get unauthorized, without retrying
+with stored credentials. Override users must choose a strong secret themselves.
+The app captures its process override at startup. Unset and restart to switch to
+managed credentials. Rotation is blocked while an override exists.
+
+A lifecycle mutex serializes controls, including startup, and operations finish
+even if an IPC caller disconnects. Blocking keyring/SQLite calls run on blocking
+workers. Windows CredWrite atomically replaces the credential; the new active
+token is published only after a successful write, with no subsequent persistence
+step to fail. Failed rotation preserves both the old stored and active token.
+Each HTTP request checks the current token, including retained keep-alive
+connections. Disable revokes authorization before fallible persistence, closes
+the listener, and retains the credential. If saving disable fails, runtime access
+stays denied but the old enabled preference remains on disk: the UI reports the
+failure and asks the user to retry before restart. Requests already authorized
+before a successful disable/rotation may finish; subsequent requests are denied
+or require the replacement token.
+
+All `/api/v1` routes require bearer authentication, and browser Origin (including
+`null`) or Fetch Metadata requests are explicitly rejected, with no CORS layer.
+Status distinguishes listening from preference and bind/server/credential errors;
+Refresh API status re-reads runtime status. Responses never contain auth secrets,
+provider credentials, or raw error bodies. Auth failures return static 401/403
+errors; when disabled there normally is no listener (retained connections still
+fail the authorization gate). This does not defend against malware already able
+to read the same Windows user's Credential Manager.
+
+The HTTP-only `ellie-cli` shares token resolution and the fixed credential account,
+not SQLite/provider-core access. It reads stored credentials automatically on a
+blocking worker for each invocation unless explicitly overridden. It sends the
+token only in Authorization, disables system/environment proxy routing, never
+prints tokens or raw error bodies, and uses static redacted credential errors.
+Offline help/version do not read credentials or contact the app. See `docs/cli.md`.
+Automated tests use only injected mock stores, temporary SQLite files, and
+loopback mock servers; native credential operations remain a Windows smoke check.
 
 Logs are structured lifecycle events written to stdout. File logging and log retention are not implemented. The application does not register Windows autostart or change system settings.

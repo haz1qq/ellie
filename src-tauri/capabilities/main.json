@@ -6,6 +6,8 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "allow-local-api-status",
+    "allow-configure-local-api",
     "allow-get-bootstrap",
     "allow-get-analytics",
     "allow-save-settings",

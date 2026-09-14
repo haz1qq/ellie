@@ -10,7 +10,7 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &str) -> Result<(), AppError>;
 }
 
-const SERVICE: &str = "ellie";
+const SERVICE: &str = crate::local_api_token::SERVICE;
 
 /// Key-backed providers and the credential account name each uses.
 pub const KEY_PROVIDERS: &[(&str, &str)] = &[

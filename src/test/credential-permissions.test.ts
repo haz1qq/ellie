@@ -14,6 +14,8 @@ const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 // parts of each native IPC route aligned, without accessing any secrets.
 describe("credential IPC permissions", () => {
   it.each([
+    "local_api_status",
+    "configure_local_api",
     "save_provider_key",
     "delete_provider_key",
     "provider_key_status",
@@ -38,6 +40,8 @@ describe("credential IPC permissions", () => {
     expect(capability.permissions).toEqual([
       "core:event:allow-listen",
       "core:event:allow-unlisten",
+      "allow-local-api-status",
+      "allow-configure-local-api",
       "allow-get-bootstrap",
       "allow-get-analytics",
       "allow-save-settings",
@@ -78,6 +82,8 @@ describe("credential IPC permissions", () => {
       "allow-open-main-window",
     ]);
     for (const forbidden of [
+      "allow-local-api-status",
+      "allow-configure-local-api",
       "allow-get-bootstrap",
       "allow-save-settings",
       "allow-refresh-all",

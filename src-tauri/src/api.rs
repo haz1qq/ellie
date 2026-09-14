@@ -8,10 +8,10 @@ use axum::{
 };
 use serde::Serialize;
 use tauri::Manager;
-use tokio::net::TcpListener;
 
 use crate::{
     commands::{self, AppState},
+    local_api::Authorization,
     providers::{
         AuthState, DataKind, ProviderCapabilities, ProviderError, ProviderOverview, SpendEstimate,
         TokenUsage, UsageWindow,
@@ -128,42 +128,36 @@ impl From<RefreshResponse> for ApiRefreshResponse {
 
 pub fn spawn(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let listener = match TcpListener::bind(API_ADDRESS).await {
-            Ok(listener) => listener,
-            Err(error) => {
-                tracing::warn!(event = "local_api_bind_failed", address = API_ADDRESS, error = ?error);
-                return;
-            }
-        };
-        tracing::info!(event = "local_api_started", address = API_ADDRESS);
-        if let Err(error) = axum::serve(listener, router(app)).await {
-            tracing::warn!(event = "local_api_stopped", error = ?error);
-        }
+        let controller = app.state::<AppState>().local_api.clone();
+        controller.apply(None, router(app.clone())).await;
     });
 }
 
-fn router(app: tauri::AppHandle) -> Router {
+pub(crate) fn router(app: tauri::AppHandle) -> Router {
+    let auth = app.state::<AppState>().local_api.authorization();
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/providers", get(providers))
         .route("/api/v1/usage", get(usage))
         .route("/api/v1/providers/{provider_id}/usage", get(provider_usage))
         .route("/api/v1/refresh", post(refresh))
-        .layer(middleware::from_fn(require_bearer_token))
+        .layer(middleware::from_fn_with_state(auth, require_bearer_token))
         .with_state(ApiState { app })
 }
 
-async fn require_bearer_token(request: Request<axum::body::Body>, next: Next) -> Response {
-    let Some(expected) = std::env::var("ELLIE_API_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return api_error(StatusCode::SERVICE_UNAVAILABLE, "api_token_not_configured");
-    };
-    let Some(provided) = bearer_token(request.headers()) else {
-        return api_error(StatusCode::UNAUTHORIZED, "unauthorized");
-    };
-    if !constant_time_equal(provided.as_bytes(), expected.as_bytes()) {
+pub(crate) async fn require_bearer_token(
+    State(auth): State<Authorization>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    // No browser clients are supported. Reject Origin (including null) and
+    // Fetch Metadata even if a browser has somehow obtained a bearer token.
+    if request.headers().contains_key(header::ORIGIN)
+        || request.headers().contains_key("sec-fetch-site")
+    {
+        return api_error(StatusCode::FORBIDDEN, "browser_origin_denied");
+    }
+    if !auth.accepts(bearer_token(request.headers())).await {
         return api_error(StatusCode::UNAUTHORIZED, "unauthorized");
     }
     next.run(request).await
@@ -175,17 +169,6 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|value| !value.is_empty())
-}
-
-fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or_default()
-                ^ right.get(index).copied().unwrap_or_default(),
-        );
-    }
-    difference == 0
 }
 
 fn api_error(status: StatusCode, error: &'static str) -> Response {
@@ -263,12 +246,5 @@ mod tests {
             "Bearer secret".parse().expect("header"),
         );
         assert_eq!(bearer_token(&headers), Some("secret"));
-    }
-
-    #[test]
-    fn compares_tokens_without_accepting_prefix_or_suffix() {
-        assert!(constant_time_equal(b"secret", b"secret"));
-        assert!(!constant_time_equal(b"secret", b"secret2"));
-        assert!(!constant_time_equal(b"Bearer secret", b"secret"));
     }
 }

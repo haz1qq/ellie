@@ -48,8 +48,8 @@ If a rebuild reports `failed to remove ... ellie.exe` / `Access is denied (os er
 - Snapshot history: every successful provider refresh is persisted with provenance (`live`/`mock`, `provider_reported`/`locally_calculated`); latest/ history/cleanup storage functions; 90-day retention cleaned up periodically on a background worker.
 - **Historical analytics:** the dedicated History tab can query Today, 7-day, 30-day, and 90-day local ranges for latest token/request summaries, daily token activity, currency-grouped spend estimates, and latest provider-reported quota utilization. Mock snapshots and repeated refreshes are excluded or deduplicated, and source labels distinguish provider data from Ellie estimates. See `docs/milestone-9.md`.
 - Persisted preferences: close to tray, dashboard mascot, friendly messages, hidden provider cards, and mini floating bar enablement, opacity, and position.
-- Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings. A loopback local API is available on `127.0.0.1:9876` when `ELLIE_API_TOKEN` is configured.
-- `ellie-cli` command-line interface: `status`, `refresh`, and `version` consumed through the loopback local API with the `ELLIE_API_TOKEN` bearer token. It requires the tray app running with the token set, never prints credentials or raw API bodies, and maps failures to documented exit codes. The tray app keeps the `ellie.exe` name; the CLI ships as `ellie-cli`. See `docs/cli.md`.
+- Structured JSON lifecycle logs to stdout. Background polling runs every five minutes with bounded per-provider backoff. Windows usage notifications use configurable global thresholds (defaulting to 75%, 90%, and 95%) and can be disabled in Settings. The loopback local API on `127.0.0.1:9876` is opt-in through Settings → Integrations (OFF by default, including upgrades).
+- `ellie-cli` command-line interface: `status`, `refresh`, and `version` consumed through the loopback local API with an automatically shared Windows Credential Manager token, or an explicit `ELLIE_API_TOKEN` override. It requires the tray app running with Local API enabled, never prints credentials or raw API bodies, and maps failures to documented exit codes. The tray app keeps the `ellie.exe` name; the CLI ships as `ellie-cli`. See `docs/cli.md`.
 
 SQLite lives at the Tauri local application data directory (`%LOCALAPPDATA%\com.haz1qq.ellie\ellie.sqlite3` on Windows). It contains non-sensitive preferences and usage history (including clearly marked demo snapshots); credentials never touch it. A failed settings save keeps the previous settings active. Database initialization failures stop startup without overwriting the file.
 
@@ -73,3 +73,34 @@ See [milestone 3 verification](docs/milestone-3.md), [Milestone 9 analytics](doc
 - [Security](docs/security.md)
 
 The cat is an illustrative interpretation, not a reproduction of the real Ellie's markings. Source artwork is in `assets/cat-icon.svg` and `src/components/Cat.tsx`.
+
+## Local API onboarding (0.3.0)
+
+1. Open Ellie → **Settings → Integrations → Enable Local API**. New installations
+   and upgrades start **OFF**, even if `ELLIE_API_TOKEN` is already set.
+2. Without an override, Ellie generates a 256-bit cryptographically random token
+   and stores it only in Windows Credential Manager (`ellie` / `local_api_token`).
+   Run `ellie-cli status` or `ellie-cli refresh` as the same Windows user; no token
+   copying or environment configuration is needed.
+3. Settings reports the persisted preference, actual listening status, token
+   source, and redacted errors. **Refresh API status** rechecks the runtime.
+   **Rotate API token** replaces the stored token; the next CLI invocation reads
+   it automatically. Old tokens stop working for subsequent requests.
+4. **Disable Local API** revokes access and closes the listener, including when
+   an environment override exists. The stored token is retained for re-enabling.
+
+`ELLIE_API_TOKEN` is an advanced explicit override in each process: it takes
+precedence over the stored token, but never enables the API. Empty, non-Unicode,
+whitespace-containing, non-visible-ASCII, and over-512-byte overrides fail closed;
+there is no silent fallback on invalid or rejected overrides. Valid overrides
+must match between app and client. Rotation is unavailable under an override;
+unset it and restart Ellie/the CLI environment to restore automatic credentials.
+Tokens are never displayed, copied through IPC, or saved in SQLite/configuration.
+Already-authorized work may finish after disable/rotation. If disabling cannot
+save its preference, access is denied for this run, but retry successfully before
+restarting because the previous enabled preference remains on disk.
+
+Automated tests use mock credentials and temporary databases only. Native Windows
+Credential Manager onboarding, restart/rotation, and live CLI/provider behavior
+remain manual verification; no owner credentials were accessed for these tests.
+See [CLI usage](docs/cli.md) and [security](docs/security.md).
