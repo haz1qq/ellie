@@ -77,20 +77,21 @@ command or extra arguments print the help text to stderr and exit with code 2.
 
 Fetches `GET /api/v1/usage` and prints one report. Output follows the §38
 example shape; provider names are the ones the API reports (for example
-`OpenAI / Codex`, `Anthropic / Claude`, `DeepSeek`), the used percentage comes
-from each quota window's `usedPercent`, and the reset countdown is computed
-locally with chrono from the authoritative `resetAt` timestamp:
+`OpenAI / Codex`, `Anthropic / Claude`, `DeepSeek`), the remaining percentage
+comes from each quota window's `remainingPercent` (derived as `100 - usedPercent`
+when only used is reported), and the reset countdown is computed locally with
+chrono from the authoritative `resetAt` timestamp:
 
 ```text
 Ellie
 
 OpenAI / Codex
-  5 Hour    63% used     Reset 2h 14m
-  Weekly    42% used     Reset 3d 7h
+  5 Hour    37% remaining     Reset 2h 14m
+  Weekly    58% remaining     Reset 3d 7h
 
 Anthropic / Claude
-  5 Hour    81% used     Reset 3h 22m
-  Weekly    54% used     Reset 4d 2h
+  5 Hour    19% remaining     Reset 3h 22m
+  Weekly    46% remaining     Reset 4d 2h
 
 DeepSeek
   Balance   $8.42
@@ -103,11 +104,11 @@ Rendering policy:
   produced data and carry no error are omitted too (the API/dashboard hide
   unconfigured providers the same way). If every provider is omitted, the
   report prints `No provider usage data available`.
-- Each quota window prints its label, used percent, and reset countdown.
+- Each quota window prints its label, remaining percent, and reset countdown.
   Windows whose `source` is `locally_calculated` are labelled
   `(Ellie estimate)`; provider-reported windows carry no suffix.
-- A window with no `usedPercent` prints `used: Unavailable`; a window with no
-  `resetAt` prints `Reset unknown`.
+- A window with neither remaining percent nor used percent prints
+  `remaining: Unavailable`; a window with no `resetAt` prints `Reset unknown`.
 - A provider with data but no windows and no balance prints
   `No usage data available`. A balance whose currency is missing or empty is
   printed with `(currency unavailable)` rather than as an unlabeled number.

@@ -111,6 +111,7 @@ struct ApiRefreshResponse {
 struct UsageWindow {
     label: String,
     used_percent: Option<f64>,
+    remaining_percent: Option<f64>,
     reset_at: Option<DateTime<Utc>>,
     source: MetricSource,
 }
@@ -374,10 +375,16 @@ fn provider_lines(provider: &ApiProvider, now: DateTime<Utc>) -> Option<Vec<Stri
 }
 
 fn format_window_line(window: &UsageWindow, now: DateTime<Utc>) -> String {
-    let used = window.used_percent.map_or_else(
-        || "used: Unavailable".to_string(),
-        |percent| format!("{percent:.0}% used"),
-    );
+    // Prefer the provider-reported remaining percentage; when it is missing but
+    // used is present, derive 100 - used (the API model validates these as
+    // complements of the same window whenever both are reported).
+    let remaining = window
+        .remaining_percent
+        .or_else(|| window.used_percent.map(|used| 100.0 - used))
+        .map_or_else(
+            || "remaining: Unavailable".to_string(),
+            |percent| format!("{percent:.0}% remaining"),
+        );
     let reset = window.reset_at.map_or_else(
         || "Reset unknown".to_string(),
         |reset| format!("Reset {}", reset_countdown(reset, now)),
@@ -388,10 +395,10 @@ fn format_window_line(window: &UsageWindow, now: DateTime<Utc>) -> String {
         MetricSource::LocallyCalculated => " (Ellie estimate)",
         MetricSource::ProviderReported => "",
     };
-    // Matches the §38 example exactly: `  5 Hour    63% used     Reset 2h 14m`,
-    // i.e. label padded to 6, then 4 spaces, the used segment (+ provenance),
+    // Matches the §38 example exactly: `  5 Hour    37% remaining     Reset 2h 14m`,
+    // i.e. label padded to 6, then 4 spaces, the remaining segment (+ provenance),
     // then 5 spaces before the Reset column.
-    format!("{:<6}    {used}{provenance}     {reset}", window.label)
+    format!("{:<6}    {remaining}{provenance}     {reset}", window.label)
 }
 
 fn format_balance_line(balance: f64, currency: Option<&str>) -> String {
@@ -769,6 +776,7 @@ mod tests {
         assert_eq!(openai.windows.len(), 2);
         assert_eq!(openai.windows[0].label, "5 Hour");
         assert_eq!(openai.windows[0].used_percent, Some(63.0));
+        assert_eq!(openai.windows[0].remaining_percent, Some(37.0));
         assert_eq!(openai.windows[0].source, MetricSource::ProviderReported);
         let deepseek = &envelope.providers[2];
         assert_eq!(deepseek.balance, Some(8.42));
@@ -898,12 +906,12 @@ mod tests {
 Ellie
 
 OpenAI / Codex
-  5 Hour    63% used     Reset 2h 14m
-  Weekly    42% used     Reset 3d 7h
+  5 Hour    37% remaining     Reset 2h 14m
+  Weekly    58% remaining     Reset 3d 7h
 
 Anthropic / Claude
-  5 Hour    81% used     Reset 3h 22m
-  Weekly    54% used     Reset 4d 2h
+  5 Hour    19% remaining     Reset 3h 22m
+  Weekly    46% remaining     Reset 4d 2h
 
 DeepSeek
   Balance   $8.42
@@ -982,7 +990,7 @@ DeepSeek
         }"#;
         let envelope = parse_envelope(json);
         let output = format_status(&envelope.providers, fixed_now());
-        assert!(output.contains("5 Hour    63% used     Reset 2h 14m"));
+        assert!(output.contains("5 Hour    37% remaining     Reset 2h 14m"));
         assert!(output.contains("Data unavailable"));
         assert!(output.contains("Stale — showing data from a previous refresh (data from 2h 0m)"));
         // The typed error is friendly static copy, not the raw serialized value.
@@ -1016,7 +1024,7 @@ DeepSeek
         let envelope = parse_envelope(json);
         assert_eq!(
             format_status(&envelope.providers, fixed_now()),
-            "Ellie\n\nOpenAI / Codex\n  5 Hour    63% used     Reset 2h 14m\n  Authentication has expired\n  Stale — showing data from a previous refresh (data from 2h 0m)\n"
+            "Ellie\n\nOpenAI / Codex\n  5 Hour    37% remaining     Reset 2h 14m\n  Authentication has expired\n  Stale — showing data from a previous refresh (data from 2h 0m)\n"
         );
     }
 
@@ -1139,7 +1147,7 @@ DeepSeek
         }"#;
         let envelope = parse_envelope(json);
         let output = format_status(&envelope.providers, fixed_now());
-        assert!(output.contains("Monthly    30% used (Ellie estimate)     Reset 4d 2h\n"));
+        assert!(output.contains("Monthly    70% remaining (Ellie estimate)     Reset 4d 2h\n"));
     }
 
     #[test]
@@ -1171,7 +1179,7 @@ DeepSeek
         }"#;
         let envelope = parse_envelope(json);
         assert!(format_status(&envelope.providers, fixed_now())
-            .contains("5 Hour    used: Unavailable     Reset unknown\n"));
+            .contains("5 Hour    remaining: Unavailable     Reset unknown\n"));
     }
 
     #[test]
