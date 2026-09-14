@@ -1312,12 +1312,12 @@ Output:
 Ellie
 
 OpenAI Codex
-  5 Hour    63% used     Reset 2h 14m
-  Weekly    42% used     Reset 3d 7h
+  5 Hour    37% remaining     Reset 2h 14m
+  Weekly    58% remaining     Reset 3d 7h
 
 Claude
-  5 Hour    81% used     Reset 3h 22m
-  Weekly    54% used     Reset 4d 2h
+  5 Hour    19% remaining     Reset 3h 22m
+  Weekly    46% remaining     Reset 4d 2h
 
 DeepSeek
   Balance   $8.42
@@ -1337,7 +1337,7 @@ The CLI is not required for v0.1.
 
 Original implementation decision (2026, `feat/cli`, authentication superseded by 0.3.0 below): build **Route B first** — a thin second Cargo binary in `src-tauri` that consumes the existing local REST API (`127.0.0.1:9876/api/v1`) with the `ELLIE_API_TOKEN` bearer token, starting with `status`, `refresh`, and `version`. It never touches credentials, SQLite, or core internals, mirrors the Pi-extension contract, and requires the tray app running with the token set. Direct-core reuse (Route A, works with Ellie closed) remains a possible follow-up.
 
-Original status (2026, `feat/cli`, authentication superseded by 0.3.0 below): Route B is **implemented** as the explicit Cargo bin `ellie-cli` (`src-tauri/src/bin/ellie_cli.rs`, `[[bin]] name = "ellie-cli"`), keeping `ellie.exe` as Cargo's default GUI target. `status` prints §38-shaped per-provider reports using the API's real display names and window labels, with chrono-computed reset countdowns from `resetAt`, DeepSeek-style balance rows, provenance labels (`(Ellie estimate)` for locally calculated windows), and explicit stale/unavailable/empty handling; mock (demo) and never-fetched providers are omitted, with an explicit report-level message when nothing remains. `refresh` posts to `/api/v1/refresh` and prints the updated report (or notes a busy refresh); its six-minute request deadline covers the coordinator's bounded sequential provider work while status retains a 30-second deadline. `version` prints `CARGO_PKG_VERSION`; `help`/no-args print usage. Errors are redacted to friendly copy with documented exit codes; the token and raw bodies are never printed, and automatic system/environment proxy routing is disabled so the fixed loopback bearer request cannot be delegated to a proxy (see `docs/cli.md`). Automated checks passed: `cargo fmt`, clippy `--all-targets --all-features -D warnings`, and `cargo test` (73 library tests plus 29 `ellie-cli` tests including tiny mock HTTP servers covering GET/POST success, proxy bypass, refresh deadlines, 401/403/503/malformed-body/connection-refused paths). A live `status`/`refresh` against a running app with a real token is still a manual Windows smoke check; installer inclusion of the CLI is deferred to Milestone 10.
+Original status (2026, `feat/cli`, authentication superseded by 0.3.0 below): Route B is **implemented** as the explicit Cargo bin `ellie-cli` (`src-tauri/src/bin/ellie_cli.rs`, `[[bin]] name = "ellie-cli"`), keeping `ellie.exe` as Cargo's default GUI target. `status` prints §38-shaped per-provider reports using the API's real display names and window labels, with the remaining percentage (`remainingPercent`, derived from `usedPercent` when needed) and chrono-computed reset countdowns from `resetAt`, DeepSeek-style balance rows, provenance labels (`(Ellie estimate)` for locally calculated windows), and explicit stale/unavailable/empty handling; mock (demo) and never-fetched providers are omitted, with an explicit report-level message when nothing remains. `refresh` posts to `/api/v1/refresh` and prints the updated report (or notes a busy refresh); its six-minute request deadline covers the coordinator's bounded sequential provider work while status retains a 30-second deadline. `version` prints `CARGO_PKG_VERSION`; `help`/no-args print usage. Errors are redacted to friendly copy with documented exit codes; the token and raw bodies are never printed, and automatic system/environment proxy routing is disabled so the fixed loopback bearer request cannot be delegated to a proxy (see `docs/cli.md`). Automated checks passed: `cargo fmt`, clippy `--all-targets --all-features -D warnings`, and `cargo test` (73 library tests plus 29 `ellie-cli` tests including tiny mock HTTP servers covering GET/POST success, proxy bypass, refresh deadlines, 401/403/503/malformed-body/connection-refused paths). A live `status`/`refresh` against a running app with a real token is still a manual Windows smoke check; installer inclusion of the CLI is deferred to Milestone 10.
 
 ### Secure local API onboarding — 0.3.0 (`feat/local-api-auth`)
 
