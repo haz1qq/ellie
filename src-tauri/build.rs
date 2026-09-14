@@ -1,6 +1,8 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "local_api_status",
+            "configure_local_api",
             "get_bootstrap",
             "get_mini_bootstrap",
             "open_main_window",

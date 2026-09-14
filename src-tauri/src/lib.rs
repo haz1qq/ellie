@@ -4,6 +4,8 @@ mod commands;
 pub mod credentials;
 pub mod error;
 pub mod history;
+mod local_api;
+pub mod local_api_token;
 mod mini_bar;
 mod notifications;
 pub mod providers;
@@ -57,6 +59,12 @@ pub fn run() -> Result<(), AppError> {
                 .map_err(|_| AppError::Background)??;
             app.manage(AppState {
                 database_path: database_path.clone(),
+                local_api: local_api::LocalApi::new(
+                    database_path.clone(),
+                    Arc::new(credentials::WindowsCredentialStore),
+                    std::env::var_os(local_api_token::ENVIRONMENT),
+                    api::API_ADDRESS,
+                ),
                 close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
@@ -79,10 +87,12 @@ pub fn run() -> Result<(), AppError> {
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 10);
+            tracing::info!(event = "app_started", schema_version = 11);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::local_api_status,
+            commands::configure_local_api,
             commands::get_bootstrap,
             commands::get_mini_bootstrap,
             commands::open_main_window,

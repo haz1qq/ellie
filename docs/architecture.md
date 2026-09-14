@@ -9,6 +9,8 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/mini_bar.rs` | Mini-window visibility and monitor-safe physical position restoration |
 | `src-tauri/src/commands.rs` | Typed IPC, serialized preference writes, and refresh commands |
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
+| `src-tauri/src/local_api_token.rs` | Narrow shared app/CLI token validation, override precedence, fixed keyring identity |
+| `src-tauri/src/local_api.rs` | Serialized API opt-in/auth lifecycle, active authorization gate, redacted runtime status |
 | `src-tauri/src/credentials.rs` | Windows Credential Manager (keyring) key storage and key IPC status |
 | `src-tauri/src/history.rs` | Snapshot persistence, retrieval, and 90-day retention |
 | `src-tauri/src/analytics.rs` | Range-bounded, provenance-aware historical aggregation |
@@ -22,7 +24,7 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 
 Startup initializes SQLite on a blocking worker and waits before exposing the application. Settings reads/writes run on blocking workers; writes are serialized by an async mutex. A native atomic preference controls close behavior and changes only after a successful database write. Connections have bounded busy timeouts and close after each operation.
 
-Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, 9 adds global notification thresholds, and 10 adds mini-bar enablement, opacity, and physical position. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
+Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, 9 adds global notification thresholds, 10 adds mini-bar enablement, opacity, and physical position, and 11 adds the opt-in local API enable flag defaulting to false. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
 
 Tray navigation sets the intended view in native state and emits a window-scoped navigation event. The frontend subscribes before reading initial state, supporting early tray interactions. Left-click restores the overview; the Settings menu opens the settings view. The mini bar's open command uses that same main-window unminimize/show/focus/Overview helper. Refresh is enabled and routes through the same refresh coordinator as the dashboard and automatic poller. The main bootstrap also uses this shared emitting refresh path so an already-open mini window receives the completed startup data. Closing the main window hides it when close-to-tray is enabled; when disabled, Ellie exits and closes auxiliary windows rather than leaving an orphaned mini bar.
 
@@ -48,15 +50,50 @@ Temporary-database tests cover migration from schema 6, default visibility, pers
 
 ## Dependencies
 
-Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides async coordination, timers, and networking; serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the provider API calls; keyring persists provider API keys in Windows Credential Manager. Axum serves the loopback local API. Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests.
+Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides async coordination, timers, and networking; serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the provider API calls; keyring persists provider API keys in Windows Credential Manager. Axum serves the loopback local API. `getrandom` supplies OS-backed cryptographic randomness for managed API tokens (32 bytes; no custom PRNG). Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests.
 
-The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter plus live adapters for OpenAI / Codex (codex app-server quota plus best-effort daily token activity over stdio), OpenAI API (documented Organization Usage API billing activity), Anthropic / Claude (documented Admin API usage and cost), and DeepSeek (documented balance endpoint). Authentication is reused (`codex login`) or key-based (`OPENAI_ADMIN_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`); Ellie never stores tokens or logs secrets. OpenAI API billing is a separate provider/card so it is never combined with ChatGPT/Codex subscription quota or activity. Snapshots carry an explicit subscription flag so unsubscribed providers hide and reappear on resubscription, and unconfigured providers collapse until configured. No invented quota windows, balances, estimates, or reset times are displayed as account data.
+The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter plus live adapters for OpenAI / Codex (codex app-server quota plus best-effort daily token activity over stdio), OpenAI API (documented Organization Usage API billing activity), Anthropic / Claude (documented Admin API usage and cost), and DeepSeek (documented balance endpoint). Authentication is reused (`codex login`) or key-based (`OPENAI_ADMIN_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`); Ellie never stores Codex tokens or logs secrets. OpenAI API billing is a separate provider/card so it is never combined with ChatGPT/Codex subscription quota or activity. Snapshots carry an explicit subscription flag so unsubscribed providers hide and reappear on resubscription, and unconfigured providers collapse until configured. No invented quota windows, balances, estimates, or reset times are displayed as account data.
 
 ## Local API
 
-Milestone 8 starts an Axum server on `127.0.0.1:9876` with versioned routes for health, provider data, normalized usage, provider-specific usage, and full refresh. All routes require `Authorization: Bearer <ELLIE_API_TOKEN>`, where `ELLIE_API_TOKEN` is supplied to the Ellie process environment and is never returned by Ellie or written to SQLite. The API has no permissive CORS layer; local clients such as Pi must send the bearer token explicitly. Refresh requests call the same coordinator used by the tray, dashboard, and poller, so they preserve overlap prevention, stale fallback, history persistence, and notifications.
+0.3.0 replaces the environment-only startup path with `LocalApi`: a serialized
+controller owned by `AppState`. Startup reads the dedicated enable column on a
+blocking worker. Disabled startup neither binds nor reads keyring. Explicit
+Enable first reserves the fixed `127.0.0.1:9876` listener, resolves or securely
+creates a token, persists the enabled flag, then publishes active authorization
+and starts Axum. A port conflict therefore cannot mutate credentials. Startup of
+an enabled instance only reads existing authentication and fails closed if absent.
 
-API responses contain normalized provider data only: identities, capabilities, quota windows, balances, token activity, reset metadata, stale state, retry metadata, and typed errors. They never contain provider keys, Codex tokens, authorization headers, cookies, or raw response bodies. A missing API token returns service unavailable; an invalid or missing bearer header returns unauthorized. The server is optional at startup if its port is unavailable, and logs only a redacted bind/start/stop event.
+Generic Settings DTO/save SQL deliberately excludes this column; only dedicated
+main-window auth IPC can change it, so stale appearance drafts and mini-position
+saves cannot override authentication state. No new mini permission or secret DTO
+exists. UI status separates persisted enablement from actual listening and errors.
+
+`local_api_token.rs` is compiled as a narrow shared module in the CLI via a path
+module, not by importing provider/database internals. It defines the keyring
+identity, validation, and explicit-override-first resolution. The app uses its
+existing injectable SecretStore; the CLI uses a read-only keyring helper. Both
+perform blocking credential calls on workers. No token crosses IPC. The CLI
+remains an HTTP consumer with fixed loopback URL, proxy bypass, and offline
+help/version. The app captures its override once at startup; the CLI resolves it
+fresh for each invocation. Invalid explicit overrides never fall back.
+
+One lifecycle mutex covers startup/enable/disable/rotate. A detached operation
+owns the lock until completion even if its caller disappears. Rotation atomically
+writes keyring before swapping the in-memory token; failures leave old active
+state intact. Disable first revokes the gate, aborts/closes the listener, then
+persists false. Persistence failure is explicit: no runtime access, old preference
+still on disk, retry before restart. Credential retention on disable permits safe
+re-enable without changing clients. A generation guard prevents an obsolete
+server completion from overwriting a newer status. All errors are static/redacted.
+
+Axum middleware checks the shared active token per request, including retained
+connections, and rejects all Origin/Fetch Metadata requests. No permissive CORS
+is installed. Versioned routes and normalized response bodies are unchanged.
+Refresh still calls the same coordinator used by the tray/dashboard/poller,
+preserving overlap prevention, stale fallback, history, and notifications.
+Already-authorized work may finish after disable/rotation. See `docs/security.md`
+for credential failure and same-user threat boundaries.
 
 ## Notifications
 

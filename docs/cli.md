@@ -3,8 +3,9 @@
 `ellie-cli` is the Route B command-line companion to the Ellie tray app. It is a
 thin second Cargo binary inside `src-tauri` that speaks only to Ellie's
 loopback local REST API (`http://127.0.0.1:9876/api/v1`) using the
-`ELLIE_API_TOKEN` bearer token. It never touches credentials, SQLite, or Ellie
-core internals, and it does not work while the tray app is stopped.
+shared Windows Credential Manager token or explicit `ELLIE_API_TOKEN` override.
+It shares only narrow Rust credential resolution, never SQLite or provider-core
+internals, and it does not work while the tray app is stopped.
 
 ## Executable naming
 
@@ -23,14 +24,36 @@ The binary is produced at `src-tauri/target/debug/ellie-cli.exe`. Inclusion of
 the CLI in the Windows installer is a Milestone 10 packaging decision and is
 not implemented yet; for now the CLI is a developer-built cargo binary.
 
-## Prerequisites
+## Onboarding and prerequisites (0.3.0)
 
-- The Ellie tray app must be running so its local API is reachable at
-  `127.0.0.1:9876`.
-- The `ELLIE_API_TOKEN` environment variable must be set in the CLI's process
-  to the same bearer token the running Ellie app was started with. If the app
-  was started without `ELLIE_API_TOKEN`, every API route returns HTTP 503 and
-  the CLI reports `Ellie's local API has no token configured`.
+- Start Ellie and select **Settings → Integrations → Enable Local API**.
+  The API is **OFF by default on fresh installs and upgrades**, even when
+  `ELLIE_API_TOKEN` is already configured. Persisted enablement is authoritative.
+- Without an override, Ellie securely generates a missing token and saves it only
+  in Windows Credential Manager (`ellie` / `local_api_token`). Run the CLI as the
+  same Windows user: it automatically reads the stored token on a blocking worker
+  for each invocation. There is no token display, copy, export, or clipboard step.
+- Settings displays actual listening/error status separately from preference.
+  A missing/unreadable token on restart fails closed. Explicit Enable recovers a
+  missing token; store errors require fixing credential access before retrying.
+- **Rotate API token** atomically replaces the managed token. Subsequent requests
+  with the old token are unauthorized; the next CLI invocation reads the new one.
+  Failed replacement preserves the old credential and running authentication.
+- **Disable Local API** revokes access and closes the listener even under override.
+  It retains the credential. If persistence fails, access stays denied for the
+  current run but the previous preference remains on disk; retry before restart.
+  Already-authorized work may finish after disable/rotation.
+
+### Advanced explicit override
+
+`ELLIE_API_TOKEN` takes precedence in each process, but never enables the API.
+When present it must match the running app's override. Empty, non-Unicode,
+whitespace-containing, non-visible-ASCII, or over-512-byte values are invalid;
+neither app nor CLI silently falls back to stored authentication. A syntactically
+valid but mismatched override fails HTTP authorization, without a stored-token
+retry. Choose a strong secret if using this advanced path. App environment is
+captured at startup; unset the override and restart Ellie/the CLI environment to
+return to automatic credentials. Rotation is unavailable under an app override.
 
 The token is sent only in the `Authorization: Bearer` header. The CLI disables
 reqwest's automatic system/environment proxy routing so the fixed loopback
@@ -125,7 +148,7 @@ Prints the CLI version from `CARGO_PKG_VERSION` (in lockstep with the app
 version), for example:
 
 ```text
-0.2.0
+0.3.0
 ```
 
 ## Exit codes
@@ -134,9 +157,9 @@ version), for example:
 | --- | --- |
 | 0 | Success. |
 | 1 | Ellie is unreachable: not running, connection refused, timeout, or network error. |
-| 2 | Usage or environment error: unknown command/extra arguments, or `ELLIE_API_TOKEN` missing/empty. |
-| 3 | Unauthorized: the `ELLIE_API_TOKEN` does not match the running app (HTTP 401/403). |
-| 4 | The app's local API has no token configured (HTTP 503 `api_token_not_configured`). |
+| 2 | Usage or credential error: unknown command/extra arguments, invalid explicit override, missing token, or credential-store failure. |
+| 3 | Unauthorized: the resolved token does not match the running app, or the request is forbidden (HTTP 401/403). |
+| 4 | The app's local API is unavailable (HTTP 503; retained for older servers). Disabled 0.3.0 normally has no listener (code 1); retained connections are denied (code 3). |
 | 5 | Requested provider not found (HTTP 404; reserved — the current commands do not take a provider argument). |
 | 6 | Ellie returned an unexpected response or a server error (other non-2xx status, or a malformed/unparseable body). |
 
@@ -155,7 +178,7 @@ version), for example:
 
 ## Limitations
 
-- Route B requires the tray app to be running with the token set; there is no
+- Route B requires the tray app to be running with Local API enabled; there is no
   offline mode (direct-core reuse remains a possible Route A follow-up).
 - Provider display names and window labels are copied verbatim from the API;
   the §38 illustration uses shortened names (`OpenAI Codex`, `Claude`).
@@ -169,24 +192,42 @@ version), for example:
 
 ## Verification status
 
-Automated checks ran locally (see the git worktree for exact commands and
-outputs):
+Automated 0.3.0 validation uses mock credential stores, temporary databases, and
+loopback HTTP servers only. Tests cover opt-in upgrade defaults, persisted enable
+and restart, disabled-with-override denial, invalid override no-fallback, missing
+and failing stores, rotation/replacement resolution, old/new HTTP authorization,
+failed rotation rollback, failed preference writes, bind errors, serialized
+controls, Origin rejection, secret exclusion, and main-only IPC scope. Existing
+CLI HTTP/error/timeout/proxy-bypass and provider normalization tests remain active.
+Frontend tests cover onboarding/status, override-disabled rotation, pending and
+failed controls, secret-redacted errors, and inert browser preview.
 
-- `cargo fmt --manifest-path src-tauri/Cargo.toml` (and `--check`).
-- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` — clean.
-- `cargo test --manifest-path src-tauri/Cargo.toml` — 73 library tests and 29
-  `ellie-cli` tests pass.
-- `git diff --check` — clean.
+Final automated results: Rust **84 library + 32 CLI tests passed**; frontend
+**59 tests across 5 files passed**. Format check, warning-denying clippy, lint,
+typecheck, frontend build, CLI build, and diff check passed. Offline CLI help
+exited successfully and version printed `0.3.0`. Native/live checks below were
+not run.
 
-`ellie-cli` tests cover serde fixtures (multiple windows, balance rows,
-missing/optional fields, empty provider lists), §38-shaped formatting and
-reset countdowns, stale/unavailable/empty/mock rendering, balance currency
-handling, provenance labels, the error-to-exit-code mapping, independent
-status/refresh deadlines, proxy bypass, and end-to-end paths against a tiny
-local mock HTTP server (GET/POST success, 401/403, 503, malformed body, and
-connection refused when nothing is listening).
+Commands run for this change:
 
-Not yet verified: a live `ellie-cli status` / `ellie-cli refresh` run against a
-running Ellie tray app with a real `ELLIE_API_TOKEN` still needs a manual
-Windows smoke check (requires an owner-configured app instance; never use real
-secrets in automated tests).
+```powershell
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+npm test
+npm run lint
+npm run typecheck
+npm run build
+cargo build --manifest-path src-tauri/Cargo.toml --bin ellie-cli
+./src-tauri/target/debug/ellie-cli.exe help
+./src-tauri/target/debug/ellie-cli.exe version
+git diff --check
+```
+
+Windows manual verification remains outstanding: native main-only IPC controls,
+Credential Manager enable/restart/rotation (including denial of the old token),
+CLI status/refresh using automatic authentication and an authorized override,
+disable denial with/without override, occupied port recovery, and normal tray
+hide/restore/refresh/settings/quit. No real owner credentials were read or changed
+by automated tests, and no live provider verification is claimed. Help/version
+are offline smokes only. Installer/PATH/autostart changes are outside this task.

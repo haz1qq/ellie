@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -18,6 +18,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0008_notifications.sql"),
     include_str!("../migrations/0009_notification_thresholds.sql"),
     include_str!("../migrations/0010_mini_floating_bar.sql"),
+    include_str!("../migrations/0011_local_api.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -159,9 +160,50 @@ pub fn save_mini_bar_position(path: &Path, x: i32, y: i32) -> Result<(), AppErro
     Ok(())
 }
 
+// Kept outside the generic Settings DTO: only the dedicated auth lifecycle may write it.
+pub fn read_local_api_enabled(path: &Path) -> Result<bool, AppError> {
+    Ok(connect(path)?.query_row(
+        "SELECT local_api_enabled FROM application_settings WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn save_local_api_enabled(path: &Path, enabled: bool) -> Result<(), AppError> {
+    let changed = connect(path)?.execute(
+        "UPDATE application_settings SET local_api_enabled = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1", [enabled],
+    )?;
+    if changed != 1 {
+        return Err(AppError::Storage);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_api_upgrade_is_opt_in_and_generic_settings_cannot_change_it() {
+        let temp = tempfile::tempdir().expect("temporary database");
+        let path = temp.path().join("ellie.sqlite3");
+        let connection = connect(&path).expect("connect");
+        for migration in &MIGRATIONS[..10] {
+            connection.execute_batch(migration).expect("old migration");
+        }
+        connection
+            .pragma_update(None, "user_version", 10)
+            .expect("old version");
+        let settings = initialize(&path).expect("upgrade");
+        assert!(!read_local_api_enabled(&path).expect("default off"));
+        save_local_api_enabled(&path, true).expect("enable");
+        save_settings_preserving_position(&path, &settings).expect("stale generic save");
+        initialize(&path).expect("restart");
+        assert!(read_local_api_enabled(&path).expect("preserved enablement"));
+        let mut json = serde_json::to_value(settings).expect("settings");
+        json["localApiEnabled"] = serde_json::json!(false);
+        assert!(serde_json::from_value::<Settings>(json).is_err());
+    }
 
     #[test]
     fn migrates_once_and_preserves_preferences_after_restart(

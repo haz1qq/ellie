@@ -155,7 +155,18 @@ export interface ProviderKeyStatus {
   source: ProviderKeySource;
 }
 
+export type LocalApiAction = "enable" | "disable" | "rotate";
+export type LocalApiFailure = "credentialStore" | "invalidOverride" | "missingToken" | "persistence" | "bind" | "server" | "overrideActive" | "disabled" | "controlsUnavailable";
+export interface LocalApiStatus {
+  enabled: boolean;
+  listening: boolean;
+  tokenSource: "none" | "environment" | "credentialManager";
+  error: LocalApiFailure | null;
+}
+
 export const desktop = {
+  localApiStatus: () => invoke<LocalApiStatus>("local_api_status"),
+  configureLocalApi: (action: LocalApiAction) => invoke<LocalApiStatus>("configure_local_api", { action }),
   available: isTauri,
   bootstrap: () => invoke<Bootstrap>("get_bootstrap"),
   miniBootstrap: () => invoke<MiniBootstrap>("get_mini_bootstrap"),

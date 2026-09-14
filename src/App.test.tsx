@@ -7,6 +7,8 @@ import { desktop, type ProviderOverview } from "./lib/desktop";
 vi.mock("./lib/desktop", () => ({
   desktop: {
     available: vi.fn(),
+    localApiStatus: vi.fn().mockResolvedValue({ enabled: false, listening: false, tokenSource: "none", error: null }),
+    configureLocalApi: vi.fn(),
     bootstrap: vi.fn(),
     getAnalytics: vi.fn(),
     saveSettings: vi.fn(),
@@ -173,6 +175,7 @@ const liveProviders: ProviderOverview[] = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(desktop.localApiStatus).mockResolvedValue({ enabled: false, listening: false, tokenSource: "none", error: null });
   vi.mocked(desktop.saveSettings).mockImplementation(async (settings) => settings);
   vi.mocked(desktop.available).mockReturnValue(true);
   vi.mocked(desktop.providerKeyStatus).mockResolvedValue([]);

@@ -2,8 +2,8 @@
 //!
 //! Route B design (see PROJECT.md §38): this binary talks only to the loopback
 //! API at `http://127.0.0.1:9876/api/v1` using the `ELLIE_API_TOKEN` bearer
-//! token. It never touches credentials, SQLite, or Ellie core internals, and
-//! it requires the Ellie tray app to be running with the token set.
+//! override or the shared Windows Credential Manager token. It never touches
+//! SQLite or provider-core internals; the tray app must be running with Local API enabled.
 //!
 //! Security rules that are enforced here:
 //! - the token is sent only in the `Authorization: Bearer` header;
@@ -13,6 +13,9 @@
 //! - provider errors are redacted to friendly copy with distinct exit codes
 //!   (see `docs/cli.md`).
 
+#[path = "../local_api_token.rs"]
+mod local_api_token;
+
 use std::env;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -21,7 +24,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 const API_BASE_URL: &str = "http://127.0.0.1:9876/api/v1";
-const TOKEN_ENV_VAR: &str = "ELLIE_API_TOKEN";
+const TOKEN_ENV_VAR: &str = local_api_token::ENVIRONMENT;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 // A forced refresh runs the configured providers sequentially. Six minutes
@@ -45,15 +48,16 @@ Usage:
   ellie-cli help       Show this help
 
 The Ellie tray app must be running so its local API is reachable at
-127.0.0.1:9876, and the ELLIE_API_TOKEN environment variable must be set to
-the same bearer token the app was started with.
+127.0.0.1:9876. Enable Local API in Settings > Integrations first. The CLI
+automatically reads its token from Windows Credential Manager. ELLIE_API_TOKEN
+is an explicit override; invalid overrides never fall back to the stored token.
 
 Exit codes:
   0  success
   1  Ellie is unreachable (not running, network error)
-  2  usage or environment error (unknown command, missing ELLIE_API_TOKEN)
-  3  unauthorized: ELLIE_API_TOKEN does not match the running app
-  4  the app's local API has no token configured
+  2  usage or credential error (unknown command, invalid override, missing/unavailable token)
+  3  unauthorized: token does not match the running app
+  4  the app's local API is unavailable
   5  requested provider not found
   6  Ellie returned an unexpected response or server error
 ";
@@ -172,11 +176,9 @@ impl CliError {
                 "could not reach Ellie's local API (network error)".to_string()
             }
             CliError::Unauthorized => format!(
-                "unauthorized: {TOKEN_ENV_VAR} does not match the token the running Ellie app was started with"
+                "unauthorized: local API token does not match; check {TOKEN_ENV_VAR} or Settings > Integrations"
             ),
-            CliError::ServerTokenNotConfigured => format!(
-                "Ellie's local API has no token configured; start the Ellie tray app with {TOKEN_ENV_VAR} set"
-            ),
+            CliError::ServerTokenNotConfigured => "Ellie's local API is unavailable; check Settings > Integrations".to_string(),
             CliError::ProviderNotFound => "provider not found".to_string(),
             CliError::ServerError(code) => {
                 format!("Ellie's local API returned an error (HTTP {code})")
@@ -489,14 +491,21 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Status | Command::Refresh => {
-            let Some(token) = env::var(TOKEN_ENV_VAR)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-            else {
-                eprintln!(
-                    "ellie-cli: set the {TOKEN_ENV_VAR} environment variable to the bearer token the Ellie tray app is running with"
-                );
-                return ExitCode::from(EXIT_USAGE_OR_ENV);
+            let explicit = env::var_os(TOKEN_ENV_VAR);
+            let resolved = tokio::task::spawn_blocking(move || {
+                local_api_token::resolve(explicit, local_api_token::read_stored_token)
+            })
+            .await;
+            let token = match resolved {
+                Ok(Ok(token)) => token,
+                Ok(Err(error)) => {
+                    eprintln!("ellie-cli: {error}");
+                    return ExitCode::from(EXIT_USAGE_OR_ENV);
+                }
+                Err(_) => {
+                    eprintln!("ellie-cli: local API credential is unavailable");
+                    return ExitCode::from(EXIT_USAGE_OR_ENV);
+                }
             };
             let client = match build_client() {
                 Ok(client) => client,
@@ -1303,6 +1312,28 @@ DeepSeek
 
     fn test_client() -> reqwest::Client {
         build_client().expect("test client")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn automatic_credential_resolution_reads_replacement_for_next_http_invocation() {
+        let stored = std::sync::Mutex::new("test-only-first-token".to_string());
+        for replacement in ["test-only-first-token", "test-only-rotated-token"] {
+            *stored.lock().expect("mock credential lock") = replacement.into();
+            let token = local_api_token::resolve(None, || {
+                Ok(Some(stored.lock().expect("mock credential lock").clone()))
+            })
+            .expect("resolve mock credential");
+            let (base, handle) = serve_once("200 OK", SECTION38_ENVELOPE.to_string()).await;
+            let envelope = get_usage(&test_client(), &base, &token)
+                .await
+                .expect("usage");
+            let output = format_status(&envelope.providers, fixed_now());
+            assert!(!output.contains(&token));
+            let request = handle.await.expect("mock server");
+            assert!(request
+                .to_lowercase()
+                .contains(&format!("authorization: bearer {replacement}")));
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

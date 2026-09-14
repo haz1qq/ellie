@@ -8,7 +8,7 @@ This is Ellie's product and engineering specification. It preserves the full 78-
 
 Use this file for product scope and architecture, and `AGENTS.md` for concise coding-agent instructions. Keep both aligned when requirements change.
 
-Current implementation: milestones 0–8 are complete on `feat/local-api` — live providers for OpenAI/Codex (codex app-server quota and activity), OpenAI API (Admin API completion usage), Anthropic/Claude (Admin API usage/cost), and DeepSeek (account balance), with unsubscribed/unconfigured providers hidden dynamically. The demo provider remains registered. Provider visibility persists across restarts without disabling fetching or deleting credentials/history. Milestone 6 adds five-minute background polling, dashboard/card/tray refresh controls, serialized refresh work, bounded provider backoff, and stale-snapshot preservation. Milestone 7 adds Windows quota notifications with configurable global warning thresholds (defaulting to 75%, 90%, and 95%), per-period deduplication, reset-aware state, and an enable/disable setting. Milestone 8 adds the loopback Axum API for local integrations, protected by an environment-provided bearer token. The separately approved mini floating bar is implemented on `feat/mini-floating-bar`: it is optional, always on top, movable with persisted monitor-validated position, opacity-configurable, and restores the main Overview when clicked. It projects only live provider-reported remaining quota from the existing normalized cache/event stream and does not add provider network behavior. Automated checks and owner-confirmed Windows smoke tests (content visibility at 480px, always-on-top, dragging with restart persistence, click-to-restore, opacity, and clean exit/Quit) passed on the release build. See `docs/milestone-0.md` … `docs/milestone-8.md` and `docs/providers/{openai,anthropic,deepseek}.md` for scope, sources, and verification evidence.
+Current implementation: milestones 0–8 are complete on `feat/local-api` — live providers for OpenAI/Codex (codex app-server quota and activity), OpenAI API (Admin API completion usage), Anthropic/Claude (Admin API usage/cost), and DeepSeek (account balance), with unsubscribed/unconfigured providers hidden dynamically. The demo provider remains registered. Provider visibility persists across restarts without disabling fetching or deleting credentials/history. Milestone 6 adds five-minute background polling, dashboard/card/tray refresh controls, serialized refresh work, bounded provider backoff, and stale-snapshot preservation. Milestone 7 adds Windows quota notifications with configurable global warning thresholds (defaulting to 75%, 90%, and 95%), per-period deduplication, reset-aware state, and an enable/disable setting. Milestone 8 adds the loopback Axum API for local integrations, protected by a bearer token; 0.3.0 adds explicit opt-in onboarding with Windows Credential Manager (see §38). The separately approved mini floating bar is implemented on `feat/mini-floating-bar`: it is optional, always on top, movable with persisted monitor-validated position, opacity-configurable, and restores the main Overview when clicked. It projects only live provider-reported remaining quota from the existing normalized cache/event stream and does not add provider network behavior. Automated checks and owner-confirmed Windows smoke tests (content visibility at 480px, always-on-top, dragging with restart persistence, click-to-restore, opacity, and clean exit/Quit) passed on the release build. See `docs/milestone-0.md` … `docs/milestone-8.md` and `docs/providers/{openai,anthropic,deepseek}.md` for scope, sources, and verification evidence.
 
 The milestones and checklists describe intended deliverables, not completed implementation. Provider fields, API responses, and Rust models are conceptual examples until verified and implemented. Actual provider capabilities must be researched during the relevant integration milestone; never treat example quotas as evidence of live support.
 
@@ -1226,7 +1226,7 @@ Response:
 ```json
 {
   "app": "ellie",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "providers": [
     {
       "id": "openai",
@@ -1335,9 +1335,44 @@ ellie-cli version
 
 The CLI is not required for v0.1.
 
-Implementation decision (2026, `feat/cli`): build **Route B first** — a thin second Cargo binary in `src-tauri` that consumes the existing local REST API (`127.0.0.1:9876/api/v1`) with the `ELLIE_API_TOKEN` bearer token, starting with `status`, `refresh`, and `version`. It never touches credentials, SQLite, or core internals, mirrors the Pi-extension contract, and requires the tray app running with the token set. Direct-core reuse (Route A, works with Ellie closed) remains a possible follow-up.
+Original implementation decision (2026, `feat/cli`, authentication superseded by 0.3.0 below): build **Route B first** — a thin second Cargo binary in `src-tauri` that consumes the existing local REST API (`127.0.0.1:9876/api/v1`) with the `ELLIE_API_TOKEN` bearer token, starting with `status`, `refresh`, and `version`. It never touches credentials, SQLite, or core internals, mirrors the Pi-extension contract, and requires the tray app running with the token set. Direct-core reuse (Route A, works with Ellie closed) remains a possible follow-up.
 
-Status (2026, `feat/cli`): Route B is **implemented** as the explicit Cargo bin `ellie-cli` (`src-tauri/src/bin/ellie_cli.rs`, `[[bin]] name = "ellie-cli"`), keeping `ellie.exe` as Cargo's default GUI target. `status` prints §38-shaped per-provider reports using the API's real display names and window labels, with chrono-computed reset countdowns from `resetAt`, DeepSeek-style balance rows, provenance labels (`(Ellie estimate)` for locally calculated windows), and explicit stale/unavailable/empty handling; mock (demo) and never-fetched providers are omitted, with an explicit report-level message when nothing remains. `refresh` posts to `/api/v1/refresh` and prints the updated report (or notes a busy refresh); its six-minute request deadline covers the coordinator's bounded sequential provider work while status retains a 30-second deadline. `version` prints `CARGO_PKG_VERSION`; `help`/no-args print usage. Errors are redacted to friendly copy with documented exit codes; the token and raw bodies are never printed, and automatic system/environment proxy routing is disabled so the fixed loopback bearer request cannot be delegated to a proxy (see `docs/cli.md`). Automated checks passed: `cargo fmt`, clippy `--all-targets --all-features -D warnings`, and `cargo test` (73 library tests plus 29 `ellie-cli` tests including tiny mock HTTP servers covering GET/POST success, proxy bypass, refresh deadlines, 401/403/503/malformed-body/connection-refused paths). A live `status`/`refresh` against a running app with a real token is still a manual Windows smoke check; installer inclusion of the CLI is deferred to Milestone 10.
+Original status (2026, `feat/cli`, authentication superseded by 0.3.0 below): Route B is **implemented** as the explicit Cargo bin `ellie-cli` (`src-tauri/src/bin/ellie_cli.rs`, `[[bin]] name = "ellie-cli"`), keeping `ellie.exe` as Cargo's default GUI target. `status` prints §38-shaped per-provider reports using the API's real display names and window labels, with chrono-computed reset countdowns from `resetAt`, DeepSeek-style balance rows, provenance labels (`(Ellie estimate)` for locally calculated windows), and explicit stale/unavailable/empty handling; mock (demo) and never-fetched providers are omitted, with an explicit report-level message when nothing remains. `refresh` posts to `/api/v1/refresh` and prints the updated report (or notes a busy refresh); its six-minute request deadline covers the coordinator's bounded sequential provider work while status retains a 30-second deadline. `version` prints `CARGO_PKG_VERSION`; `help`/no-args print usage. Errors are redacted to friendly copy with documented exit codes; the token and raw bodies are never printed, and automatic system/environment proxy routing is disabled so the fixed loopback bearer request cannot be delegated to a proxy (see `docs/cli.md`). Automated checks passed: `cargo fmt`, clippy `--all-targets --all-features -D warnings`, and `cargo test` (73 library tests plus 29 `ellie-cli` tests including tiny mock HTTP servers covering GET/POST success, proxy bypass, refresh deadlines, 401/403/503/malformed-body/connection-refused paths). A live `status`/`refresh` against a running app with a real token is still a manual Windows smoke check; installer inclusion of the CLI is deferred to Milestone 10.
+
+### Secure local API onboarding — 0.3.0 (`feat/local-api-auth`)
+
+The approved Route B extension shares only narrow Rust token resolution between
+app and CLI; the CLI remains an HTTP consumer with no SQLite/provider-core access.
+**Local API is OFF by default for fresh installs and upgrades**, including users
+who already have `ELLIE_API_TOKEN`. Migration 11 adds only the non-secret persisted
+enable flag; generic settings IPC cannot change it.
+
+Settings → Integrations offers enable/disable, actual bound/listening status,
+redacted errors, token source, rotation, and status refresh. Enabling without an
+override reuses a valid stored token or generates 32 OS-random bytes encoded as hex
+and saves only to Windows Credential Manager. Restart requires a valid token when
+the enabled preference is set; a missing/unreadable token fails closed instead of
+silently creating a new one. Explicit Enable can recover a missing token.
+
+The CLI first honors an explicit `ELLIE_API_TOKEN`; otherwise it automatically
+reads the same Windows user's stored token for each invocation. Invalid explicit
+overrides never fall back (including empty/non-Unicode/whitespace/non-visible-ASCII
+or over-512-byte values). An override never enables the listener and prevents
+rotation; unset it and restart Ellie to return to managed authentication.
+
+One Rust lifecycle lock serializes startup/enable/disable/rotation, with blocking
+credential and persistence work off UI/async threads. Rotation publishes only
+after atomic credential replacement; write failure preserves the old valid token.
+Disable revokes requests even under override, closes the listener, and retains
+the stored credential. A failed disable preference write denies access for the
+current run but reports that the old enabled preference remains; retry before
+restart. Already-authorized requests may finish. No auth secrets cross IPC/API,
+logs, UI, SQLite, or config. The two new auth IPC commands are main-window-only;
+mini permissions are unchanged. All browser Origin/Fetch Metadata requests are
+rejected; loopback routes, proxy bypass, and provider behavior remain unchanged.
+
+No installer, PATH, autostart, or provider scope is included. Automated validation
+and remaining Windows manual checks are documented in `docs/cli.md`.
 
 ## 39. Project Structure
 

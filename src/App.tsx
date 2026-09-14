@@ -1,3 +1,4 @@
+import { LocalApiSettings } from "./components/LocalApiSettings";
 import { useEffect, useState } from "react";
 import { Cat } from "./components/Cat";
 import { copy } from "./copy";
@@ -488,6 +489,7 @@ export default function App() {
                 ))}
               </fieldset>
             )}
+            <LocalApiSettings native={native} />
             <ProviderCredentials />
             <div className="settings-note">
               <h2>Dark mode, by default.</h2>

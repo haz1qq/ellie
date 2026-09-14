@@ -1,6 +1,6 @@
 [package]
 name = "ellie"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local-first AI usage companion"
 edition = "2021"
 rust-version = "1.88"
@@ -23,6 +23,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
 axum = "0.8"
+# OS-backed cryptographic randomness for local API credentials.
+getrandom = "0.3"
+# Cross-process API lifecycle ownership at the Rust 1.88 MSRV.
+fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }

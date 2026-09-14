@@ -21,6 +21,7 @@ use crate::{
 
 pub struct AppState {
     pub database_path: PathBuf,
+    pub local_api: Arc<crate::local_api::LocalApi>,
     pub close_to_tray: Arc<AtomicBool>,
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
@@ -252,4 +253,46 @@ fn validate_provider_key_input(provider_id: &str, key: &str) -> Result<(), AppEr
         return Err(AppError::Storage);
     }
     Ok(())
+}
+
+// Capability declarations and an explicit label guard keep auth controls main-window-only.
+fn require_main_window(label: &str) -> Result<(), AppError> {
+    if label != "main" {
+        return Err(AppError::Window);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn local_api_status(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<crate::local_api::ApiStatus, AppError> {
+    require_main_window(window.label())?;
+    Ok(state.local_api.status().await)
+}
+
+#[tauri::command]
+pub async fn configure_local_api(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: crate::local_api::ApiAction,
+) -> Result<crate::local_api::ApiStatus, AppError> {
+    require_main_window(window.label())?;
+    Ok(state
+        .local_api
+        .apply(Some(action), crate::api::router(app))
+        .await)
+}
+
+#[cfg(test)]
+mod local_api_ipc_tests {
+    #[test]
+    fn only_main_window_can_manage_authentication() {
+        assert!(super::require_main_window("main").is_ok());
+        for label in ["mini", "", "other"] {
+            assert!(super::require_main_window(label).is_err());
+        }
+    }
 }
