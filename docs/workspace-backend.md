@@ -158,6 +158,12 @@ A scan confirmed the owner's real Client ID appears nowhere in the repository; o
 
 **Remaining gaps (recorded, not yet implemented):** repository selection/cache persistence and commit coverage tables from the design are not yet built (commits are fetched on demand); no GitHub events exist; no UI consumes these commands (W5); live GitHub App authorization, real Windows Credential Manager writes, and refresh-token rotation are still unverified; and a connection-persistence failure keeps the in-memory session and refresh token while reporting `Disconnected` so the next `connect_complete` retry can succeed (tested).
 
+## W5a implementation status (verified on branch `feat/workspace-github`)
+
+Implemented and parent-verified: Rust-owned `github_sign_in` / `github_cancel_sign_in` orchestration. The command binds an ephemeral `127.0.0.1` listener, starts the PKCE authorization, opens the authorize URL in the default browser through `tauri-plugin-opener` with a **URL-scoped capability** (only `https://github.com/login/oauth/authorize?*` from the main window), awaits exactly one loopback GET, rejects any non-callback path and any non-loophost peer, parses only `code` + `state`, completes the connection, and serves a minimal `no-store` page to the browser. Cancellation is generation-aware and preserves the refresh token; timeout matches the 15-minute authorization lifetime. The callback code/state never cross IPC. New dependency: `tauri-plugin-opener` v2 (official).
+
+Checks actually run by the parent and their results: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` (122 library + 32 CLI, 0 failed), `npm run typecheck`, `npm run lint`, `npm test` (5 files, 74 tests), `npm run build` — all passed. A scan confirmed no owner client id or secret appears in the repository. Live authorization and real default-browser opening remain unverified until the W5b UI exists.
+
 ## Acceptance and remaining decisions
 
 Follow W1–W6 in the parent plan; this document does not renumber or combine them. Each phase requires explicit implementation authorization and the repository-defined checks.

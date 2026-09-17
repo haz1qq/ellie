@@ -18,6 +18,8 @@ fn main() {
             // least-privilege permission manifests for the main capability.
             "github_connection_status",
             "github_save_client_id",
+            "github_sign_in",
+            "github_cancel_sign_in",
             "github_connect_start",
             "github_connect_complete",
             "github_disconnect",

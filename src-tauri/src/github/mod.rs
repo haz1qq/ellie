@@ -1,9 +1,11 @@
 pub mod auth;
 pub mod connection_store;
 pub mod models;
+mod sign_in;
 
 use std::{
     fmt,
+    future::Future,
     sync::{
         atomic::{AtomicU64, AtomicU8, Ordering},
         Arc, Mutex,
@@ -38,7 +40,8 @@ const DEFAULT_PAGE_SIZE: usize = 100;
 const DEFAULT_MAX_PAGES: usize = 5;
 const DEFAULT_MAX_ROWS: usize = 500;
 const ACCESS_TOKEN_EXPIRY_MARGIN: Duration = Duration::from_secs(30);
-const AUTHORIZATION_LIFETIME: Duration = Duration::from_secs(15 * 60);
+pub(crate) const AUTHORIZATION_LIFETIME: Duration = Duration::from_secs(15 * 60);
+const LOOPBACK_BIND_ATTEMPTS: usize = 3;
 
 const STATE_DISCONNECTED: u8 = 0;
 const STATE_AUTHORIZING: u8 = 1;
@@ -243,6 +246,7 @@ pub struct GitHubService {
     restore_lock: tokio::sync::Mutex<()>,
     authorization_now: Arc<dyn Fn() -> Instant + Send + Sync>,
     authorization_lifetime: Duration,
+    authorization_changed: tokio::sync::Notify,
     limits: ServiceLimits,
 }
 
@@ -283,6 +287,7 @@ impl GitHubService {
             restore_lock: tokio::sync::Mutex::new(()),
             authorization_now: Arc::new(Instant::now),
             authorization_lifetime: AUTHORIZATION_LIFETIME,
+            authorization_changed: tokio::sync::Notify::new(),
             limits: ServiceLimits::default(),
         }
     }
@@ -442,7 +447,7 @@ impl GitHubService {
         .await?;
 
         if reset_session {
-            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.bump_generation();
             self.connection_state
                 .store(STATE_DISCONNECTED, Ordering::SeqCst);
             if let Ok(mut pending) = self.pending.lock() {
@@ -466,6 +471,112 @@ impl GitHubService {
             connection.last_error = None;
         }
         self.connection_status().await
+    }
+
+    pub async fn sign_in<F>(&self, open_url: F) -> Result<GitHubConnectionStatus, GitHubError>
+    where
+        F: FnOnce(&str) -> Result<(), GitHubError>,
+    {
+        let stored = match self.load_connection().await? {
+            Some(stored) => stored,
+            None => {
+                let error = GitHubError::authentication_required();
+                self.record_error(error.category());
+                return Err(error);
+            }
+        };
+        let listener = bind_loopback_listener().await?;
+        let port = listener
+            .local_addr()
+            .map_err(|_| GitHubError::network_unavailable())?
+            .port();
+        let authorize_url = self.connect_start(stored.client_id, port)?;
+        let generation = self.pending_generation()?;
+        let deadline = tokio::time::Instant::now() + self.authorization_lifetime;
+
+        if let Err(error) = open_url(&authorize_url) {
+            self.abort_authorization(generation, error.category()).await;
+            return Err(error);
+        }
+
+        let accepted = self
+            .wait_for_pending_authorization(generation, deadline, listener.accept())
+            .await;
+        let (mut stream, peer) = match accepted {
+            Ok(Ok(accepted)) => accepted,
+            Ok(Err(_)) => {
+                let error = GitHubError::network_unavailable();
+                self.abort_authorization(generation, error.category()).await;
+                return Err(error);
+            }
+            Err(error) => {
+                self.abort_authorization(generation, error.category()).await;
+                return Err(error);
+            }
+        };
+        if !peer.ip().is_loopback() {
+            let error = GitHubError::invalid_input();
+            sign_in::respond(&mut stream, false).await;
+            self.abort_authorization(generation, error.category()).await;
+            return Err(error);
+        }
+
+        let callback = self
+            .wait_for_pending_authorization(
+                generation,
+                deadline,
+                sign_in::read_callback(&mut stream),
+            )
+            .await;
+        let callback = match callback {
+            Ok(Ok(callback)) => callback,
+            Ok(Err(error)) | Err(error) => {
+                sign_in::respond(&mut stream, false).await;
+                self.abort_authorization(generation, error.category()).await;
+                return Err(error);
+            }
+        };
+
+        let completion = self.connect_complete(callback.code, callback.state);
+        tokio::pin!(completion);
+        let result = tokio::select! {
+            biased;
+            _ = self.wait_for_generation_change(generation) => Err(GitHubError::cancelled()),
+            result = &mut completion => result,
+        };
+        sign_in::respond(&mut stream, result.is_ok()).await;
+        if let Err(error) = result {
+            self.abort_authorization(generation, error.category()).await;
+            return Err(error);
+        }
+        result
+    }
+
+    pub async fn cancel_sign_in(&self) -> Result<GitHubConnectionStatus, GitHubError> {
+        self.bump_generation();
+        self.connection_state
+            .store(STATE_DISCONNECTED, Ordering::SeqCst);
+        if let Ok(mut pending) = self.pending.lock() {
+            *pending = None;
+        }
+        *self.access_session.lock().await = None;
+
+        let stored = self.load_connection().await?;
+        if let Ok(mut connection) = self.connection.lock() {
+            *connection = ConnectionRecord {
+                client_id: stored.as_ref().map(|value| value.client_id.clone()),
+                account: None,
+                last_error: Some(GitHubErrorCategory::Cancelled),
+            };
+        }
+        let token_present = self.read_refresh_token().await?.is_some();
+        Ok(GitHubConnectionStatus {
+            state: GitHubConnectionState::Disconnected,
+            account: None,
+            last_error: Some(GitHubErrorCategory::Cancelled),
+            token_present,
+            client_id_configured: stored.is_some(),
+        })
     }
 
     pub fn connect_start(
@@ -493,7 +604,7 @@ impl GitHubService {
                 &pkce.challenge,
                 &state,
             )?;
-            let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let generation = self.bump_generation();
             let expires_at = (self.authorization_now)()
                 .checked_add(self.authorization_lifetime)
                 .ok_or_else(GitHubError::provider_unavailable)?;
@@ -542,7 +653,7 @@ impl GitHubService {
             };
             if pending.expires_at <= (self.authorization_now)() {
                 *pending_guard = None;
-                self.generation.fetch_add(1, Ordering::SeqCst);
+                self.bump_generation();
                 self.connection_state
                     .store(STATE_DISCONNECTED, Ordering::SeqCst);
                 let error = GitHubError::cancelled();
@@ -637,7 +748,7 @@ impl GitHubService {
     }
 
     pub async fn disconnect(&self) -> Result<GitHubConnectionStatus, GitHubError> {
-        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.bump_generation();
         self.connection_state
             .store(STATE_DISCONNECTED, Ordering::SeqCst);
         if let Ok(mut pending) = self.pending.lock() {
@@ -901,11 +1012,93 @@ impl GitHubService {
             .is_some_and(|pending| pending.expires_at <= (self.authorization_now)())
         {
             *pending = None;
-            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.bump_generation();
             self.connection_state
                 .store(STATE_DISCONNECTED, Ordering::SeqCst);
         }
         Ok(())
+    }
+
+    fn pending_generation(&self) -> Result<u64, GitHubError> {
+        self.pending
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .as_ref()
+            .map(|pending| pending.generation)
+            .ok_or_else(GitHubError::cancelled)
+    }
+
+    async fn wait_for_pending_authorization<F, T>(
+        &self,
+        generation: u64,
+        deadline: tokio::time::Instant,
+        future: F,
+    ) -> Result<T, GitHubError>
+    where
+        F: Future<Output = T>,
+    {
+        tokio::pin!(future);
+        loop {
+            self.ensure_pending_authorization(generation)?;
+            tokio::select! {
+                biased;
+                _ = self.authorization_changed.notified() => continue,
+                _ = tokio::time::sleep_until(deadline) => return Err(GitHubError::cancelled()),
+                output = &mut future => return Ok(output),
+            }
+        }
+    }
+
+    async fn wait_for_generation_change(&self, generation: u64) {
+        loop {
+            if self.generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            self.authorization_changed.notified().await;
+        }
+    }
+
+    fn ensure_pending_authorization(&self, generation: u64) -> Result<(), GitHubError> {
+        self.ensure_generation(generation)?;
+        let is_current = self
+            .pending
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .as_ref()
+            .is_some_and(|pending| pending.generation == generation);
+        if self.state() != GitHubConnectionState::Authorizing || !is_current {
+            return Err(GitHubError::cancelled());
+        }
+        Ok(())
+    }
+
+    async fn abort_authorization(&self, generation: u64, category: GitHubErrorCategory) {
+        let removed = if let Ok(mut pending) = self.pending.lock() {
+            if pending
+                .as_ref()
+                .is_some_and(|pending| pending.generation == generation)
+            {
+                *pending = None;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if removed {
+            self.bump_generation();
+            self.connection_state
+                .store(STATE_DISCONNECTED, Ordering::SeqCst);
+            *self.access_session.lock().await = None;
+            self.record_error(category);
+        }
+    }
+
+    fn bump_generation(&self) -> u64 {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.authorization_changed.notify_one();
+        generation
     }
 
     fn state(&self) -> GitHubConnectionState {
@@ -924,7 +1117,7 @@ impl GitHubService {
     }
 
     async fn mark_authentication_expired(&self) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.bump_generation();
         self.connection_state
             .store(STATE_DISCONNECTED, Ordering::SeqCst);
         *self.access_session.lock().await = None;
@@ -997,6 +1190,15 @@ impl GitHubService {
         .map_err(|_| GitHubError::credential_store())?
         .map_err(|_| GitHubError::credential_store())
     }
+}
+
+async fn bind_loopback_listener() -> Result<tokio::net::TcpListener, GitHubError> {
+    for _ in 0..LOOPBACK_BIND_ATTEMPTS {
+        if let Ok(listener) = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+            return Ok(listener);
+        }
+    }
+    Err(GitHubError::network_unavailable())
 }
 
 struct ApiResponse {
@@ -1116,10 +1318,11 @@ mod tests {
     use super::*;
     use crate::credentials::{MemoryStore, SecretStore};
     use connection_store::MemoryGitHubConnectionStore;
-    use std::sync::Mutex as StdMutex;
+    use std::sync::{atomic::AtomicBool, Mutex as StdMutex};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
+        sync::oneshot,
         task::JoinHandle,
     };
 
@@ -1185,6 +1388,38 @@ mod tests {
             .expect("test client")
     }
 
+    async fn request_loopback_callback(authorize_url: String, callback_path: &str) -> String {
+        let authorize_url = Url::parse(&authorize_url).expect("authorize URL");
+        let redirect_uri = authorize_url
+            .query_pairs()
+            .find(|(key, _)| key == "redirect_uri")
+            .map(|(_, value)| value.into_owned())
+            .expect("redirect URI");
+        let state = authorize_url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("state");
+        let redirect = Url::parse(&redirect_uri).expect("redirect URL");
+        let port = redirect.port().expect("redirect port");
+        let target = format!("{callback_path}?code=sanitized-code&state={state}");
+        let mut stream = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect loopback callback");
+        let request =
+            format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("write callback");
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .await
+            .expect("read callback response");
+        String::from_utf8(response).expect("UTF-8 callback response")
+    }
+
     fn test_service(
         base_url: &str,
         store: Arc<dyn SecretStore>,
@@ -1247,6 +1482,206 @@ mod tests {
         service
             .connection_state
             .store(STATE_CONNECTED, Ordering::SeqCst);
+    }
+
+    #[tokio::test]
+    async fn orchestrated_sign_in_completes_through_a_real_loopback_callback() {
+        let (base, requests, server) = serve_sequence(vec![
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"access_token":"ghu_sanitized_access_value","expires_in":28800,"refresh_token":"ghr_sanitized_refresh_value","refresh_token_expires_in":15897600,"token_type":"bearer"}"#.to_string(),
+            },
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"id":42,"login":"octo-cat"}"#.to_string(),
+            },
+        ])
+        .await;
+        let secrets = Arc::new(MemoryStore::default());
+        let service = test_service(&base, secrets.clone(), ServiceLimits::default());
+        service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("configure client ID");
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let status = service
+            .sign_in(move |authorize_url| {
+                let authorize_url = authorize_url.to_string();
+                tokio::spawn(async move {
+                    let response =
+                        request_loopback_callback(authorize_url, sign_in::CALLBACK_PATH).await;
+                    let _ = response_tx.send(response);
+                });
+                Ok(())
+            })
+            .await
+            .expect("orchestrated sign-in");
+        server.await.expect("mock server");
+        let browser_response = response_rx.await.expect("browser response");
+
+        assert!(browser_response.starts_with("HTTP/1.1 200 OK"));
+        assert!(browser_response.contains("GitHub sign-in complete"));
+        assert_eq!(status.state, GitHubConnectionState::Connected);
+        assert_eq!(status.account.expect("account").login, "octo-cat");
+        assert!(status.token_present);
+        assert_eq!(
+            secrets
+                .get(REFRESH_TOKEN_ACCOUNT)
+                .expect("stored refresh token")
+                .as_deref(),
+            Some("ghr_sanitized_refresh_value")
+        );
+        let requests = requests.lock().expect("requests");
+        assert!(requests[0].contains("code=sanitized-code"));
+        assert!(requests[0].contains("code_verifier="));
+        assert!(!requests[0].contains("client_secret"));
+    }
+
+    #[tokio::test]
+    async fn orchestrated_sign_in_times_out_without_leaving_pending_state() {
+        let mut service = test_service(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            ServiceLimits::default(),
+        );
+        service.authorization_lifetime = Duration::from_millis(25);
+        service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("configure client ID");
+
+        let error = service
+            .sign_in(|_| Ok(()))
+            .await
+            .expect_err("authorization timeout");
+        assert_eq!(error.category(), GitHubErrorCategory::Cancelled);
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+        assert!(service
+            .pending
+            .lock()
+            .expect("pending authorization")
+            .is_none());
+        assert!(service.access_session.lock().await.is_none());
+        let status = service.connection_status().await.expect("status");
+        assert_eq!(status.state, GitHubConnectionState::Disconnected);
+        assert_eq!(status.last_error, Some(GitHubErrorCategory::Cancelled));
+        assert!(!status.token_present);
+    }
+
+    #[tokio::test]
+    async fn cancelling_orchestrated_sign_in_aborts_the_wait_and_preserves_refresh_token() {
+        let secrets = Arc::new(MemoryStore::default());
+        let mut service = test_service(
+            "http://127.0.0.1:9",
+            secrets.clone(),
+            ServiceLimits::default(),
+        );
+        service.authorization_lifetime = Duration::from_secs(5);
+        service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("configure client ID");
+        secrets
+            .set(REFRESH_TOKEN_ACCOUNT, "ghr_sanitized_existing_value")
+            .expect("existing refresh token");
+        let service = Arc::new(service);
+        let (opened_tx, opened_rx) = oneshot::channel();
+        let sign_in_service = Arc::clone(&service);
+        let sign_in = tokio::spawn(async move {
+            sign_in_service
+                .sign_in(move |_| {
+                    let _ = opened_tx.send(());
+                    Ok(())
+                })
+                .await
+        });
+        opened_rx.await.expect("browser open callback");
+
+        let cancelled = service.cancel_sign_in().await.expect("cancel sign-in");
+        let error = tokio::time::timeout(Duration::from_secs(1), sign_in)
+            .await
+            .expect("sign-in aborts promptly")
+            .expect("sign-in task")
+            .expect_err("cancelled sign-in");
+        assert_eq!(error.category(), GitHubErrorCategory::Cancelled);
+        assert_eq!(cancelled.state, GitHubConnectionState::Disconnected);
+        assert!(cancelled.token_present);
+        assert!(service
+            .pending
+            .lock()
+            .expect("pending authorization")
+            .is_none());
+        assert!(service.access_session.lock().await.is_none());
+        assert_eq!(
+            secrets
+                .get(REFRESH_TOKEN_ACCOUNT)
+                .expect("preserved refresh token")
+                .as_deref(),
+            Some("ghr_sanitized_existing_value")
+        );
+    }
+
+    #[tokio::test]
+    async fn orchestrated_sign_in_requires_a_configured_client_id() {
+        let service = test_service(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            ServiceLimits::default(),
+        );
+        let opened = Arc::new(AtomicBool::new(false));
+        let opened_in_callback = Arc::clone(&opened);
+        let error = service
+            .sign_in(move |_| {
+                opened_in_callback.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .await
+            .expect_err("missing client ID");
+        assert_eq!(
+            error.category(),
+            GitHubErrorCategory::AuthenticationRequired
+        );
+        assert!(!opened.load(Ordering::SeqCst));
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn orchestrated_sign_in_rejects_the_wrong_callback_path() {
+        let service = test_service(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            ServiceLimits::default(),
+        );
+        service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("configure client ID");
+        let (response_tx, response_rx) = oneshot::channel();
+        let error = service
+            .sign_in(move |authorize_url| {
+                let authorize_url = authorize_url.to_string();
+                tokio::spawn(async move {
+                    let response = request_loopback_callback(authorize_url, "/wrong").await;
+                    let _ = response_tx.send(response);
+                });
+                Ok(())
+            })
+            .await
+            .expect_err("wrong callback path");
+        let browser_response = response_rx.await.expect("browser response");
+
+        assert_eq!(error.category(), GitHubErrorCategory::InvalidInput);
+        assert!(browser_response.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(browser_response.contains("could not be completed"));
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+        assert!(service
+            .pending
+            .lock()
+            .expect("pending authorization")
+            .is_none());
     }
 
     #[tokio::test]

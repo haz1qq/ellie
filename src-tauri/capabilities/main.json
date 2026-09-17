@@ -1,11 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local main window may read usage analytics, manage preferences, hide to tray, save/remove provider keys, and read credential source status; stored secrets are never returned.",
+  "description": "Local main window may read usage analytics, manage preferences, hide to tray, save/remove provider keys, open GitHub authorization in the default browser, and read credential source status; stored secrets are never returned.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://github.com/login/oauth/authorize?*" }]
+    },
     "allow-local-api-status",
     "allow-configure-local-api",
     "allow-get-bootstrap",
@@ -19,6 +23,8 @@
     "allow-provider-key-status",
     "allow-github-connection-status",
     "allow-github-save-client-id",
+    "allow-github-sign-in",
+    "allow-github-cancel-sign-in",
     "allow-github-connect-start",
     "allow-github-connect-complete",
     "allow-github-disconnect",

@@ -12,6 +12,8 @@ const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 const githubCommands = [
   "github_connection_status",
   "github_save_client_id",
+  "github_sign_in",
+  "github_cancel_sign_in",
   "github_connect_start",
   "github_connect_complete",
   "github_disconnect",
@@ -64,6 +66,10 @@ describe("credential IPC permissions", () => {
     expect(capability.permissions).toEqual([
       "core:event:allow-listen",
       "core:event:allow-unlisten",
+      {
+        identifier: "opener:allow-open-url",
+        allow: [{ url: "https://github.com/login/oauth/authorize?*" }],
+      },
       "allow-local-api-status",
       "allow-configure-local-api",
       "allow-get-bootstrap",
@@ -77,6 +83,8 @@ describe("credential IPC permissions", () => {
       "allow-provider-key-status",
       "allow-github-connection-status",
       "allow-github-save-client-id",
+      "allow-github-sign-in",
+      "allow-github-cancel-sign-in",
       "allow-github-connect-start",
       "allow-github-connect-complete",
       "allow-github-disconnect",

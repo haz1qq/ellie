@@ -311,6 +311,33 @@ pub async fn github_save_client_id(
 }
 
 #[tauri::command]
+pub async fn github_sign_in(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    let app = window.app_handle().clone();
+    app_state
+        .github
+        .sign_in(move |authorize_url| {
+            use tauri_plugin_opener::OpenerExt;
+            app.opener()
+                .open_url(authorize_url, None::<&str>)
+                .map_err(|_| crate::github::GitHubError::provider_unavailable())
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn github_cancel_sign_in(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.cancel_sign_in().await
+}
+
+#[tauri::command]
 pub async fn github_connect_start(
     window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
@@ -387,6 +414,8 @@ mod local_api_ipc_tests {
         for command in [
             "github_connection_status",
             "github_save_client_id",
+            "github_sign_in",
+            "github_cancel_sign_in",
             "github_connect_start",
             "github_connect_complete",
             "github_disconnect",

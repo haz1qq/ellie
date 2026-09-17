@@ -45,6 +45,11 @@ pub fn run() -> Result<(), AppError> {
         .try_init();
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(|app| {
             let database_path = app
                 .path()
@@ -123,6 +128,8 @@ pub fn run() -> Result<(), AppError> {
             commands::provider_key_status,
             commands::github_connection_status,
             commands::github_save_client_id,
+            commands::github_sign_in,
+            commands::github_cancel_sign_in,
             commands::github_connect_start,
             commands::github_connect_complete,
             commands::github_disconnect,
