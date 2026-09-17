@@ -1,4 +1,6 @@
 import { LocalApiSettings } from "./components/LocalApiSettings";
+import { GitHubPanel } from "./components/GitHubPanel";
+import { GitHubSettings } from "./components/GitHubSettings";
 import { useEffect, useState } from "react";
 import { Cat } from "./components/Cat";
 import { copy } from "./copy";
@@ -224,6 +226,9 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <header className="app-header">
         <div className="brand">
           <Cat small />
@@ -250,6 +255,13 @@ export default function App() {
           onClick={() => navigate("history")}
         >
           History
+        </button>
+        <button
+          className={view === "github" ? "nav-active" : ""}
+          aria-current={view === "github" ? "page" : undefined}
+          onClick={() => navigate("github")}
+        >
+          GitHub
         </button>
         <button
           className={view === "settings" ? "nav-active" : ""}
@@ -362,6 +374,8 @@ export default function App() {
             error={analyticsError}
             onRangeChange={setAnalyticsRange}
           />
+        ) : view === "github" ? (
+          <GitHubPanel native={native} />
         ) : (
           <section className="settings" aria-labelledby="settings-title">
             <p className="eyebrow">Make yourself at home</p>
@@ -490,6 +504,7 @@ export default function App() {
               </fieldset>
             )}
             <LocalApiSettings native={native} />
+            <GitHubSettings native={native} />
             <ProviderCredentials />
             <div className="settings-note">
               <h2>Dark mode, by default.</h2>

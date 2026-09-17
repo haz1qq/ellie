@@ -20,6 +20,13 @@ vi.mock("./lib/desktop", () => ({
     onProvidersUpdated: vi.fn(),
     refreshAll: vi.fn(),
     refreshProvider: vi.fn(),
+    githubConnectionStatus: vi.fn(),
+    githubSaveClientId: vi.fn(),
+    githubSignIn: vi.fn(),
+    githubCancelSignIn: vi.fn(),
+    githubDisconnect: vi.fn(),
+    githubListRepositories: vi.fn(),
+    githubListCommits: vi.fn(),
   },
 }));
 const initial = {
@@ -184,6 +191,16 @@ beforeEach(() => {
   vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
   vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
   vi.mocked(desktop.refreshProvider).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
+  vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
+    state: "Disconnected",
+    account: null,
+    lastError: null,
+    tokenPresent: false,
+    clientIdConfigured: false,
+  });
+  vi.mocked(desktop.githubListRepositories).mockResolvedValue([]);
+  vi.mocked(desktop.githubListCommits).mockResolvedValue([]);
+  vi.mocked(desktop.saveProviderKey).mockResolvedValue(undefined);
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
     view: "dashboard",
@@ -828,5 +845,34 @@ describe("bootstrap shell", () => {
     await waitFor(() =>
       expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
     );
+  });
+
+  it("navigates to the GitHub view showing an invitation and no provider data", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const nav = await screen.findByRole("button", { name: "GitHub" });
+    expect(nav).not.toHaveAttribute("aria-current", "page");
+    await user.click(nav);
+    expect(nav).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.getByText(/Connect your GitHub account to browse repositories/),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "GitHub" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Providers" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Current usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Refresh now/)).not.toBeInTheDocument();
+  });
+
+  it("offers GitHub connection controls inside Settings", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(await screen.findByText(/No GitHub App Client ID saved yet/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeDisabled();
+    expect(screen.getByLabelText("GitHub App Client ID")).toBeEnabled();
+    expect(
+      screen.getByText(/refresh token is stored in Windows Credential Manager/),
+    ).toBeVisible();
   });
 });

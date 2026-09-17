@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type View = "dashboard" | "history" | "settings";
+export type View = "dashboard" | "history" | "github" | "settings";
 export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;
@@ -164,6 +164,58 @@ export interface LocalApiStatus {
   error: LocalApiFailure | null;
 }
 
+/**
+ * GitHub workspace integration (additive). Wire values match the Rust
+ * `GitHubConnectionState` enum, whose unit variants serialize verbatim
+ * (`"Disconnected"` / `"Authorizing"` / `"Connected"`).
+ */
+export type GitHubConnectionState = "Disconnected" | "Authorizing" | "Connected";
+export interface GitHubAccount {
+  id: number;
+  login: string;
+}
+/** redacted snake_case categories returned by the Rust GitHub service */
+export type GitHubErrorCategory =
+  | "window_denied"
+  | "invalid_input"
+  | "busy"
+  | "authorization_state_mismatch"
+  | "authorization_denied"
+  | "authentication_required"
+  | "authentication_expired"
+  | "rate_limited"
+  | "permission_denied"
+  | "not_found"
+  | "validation_failed"
+  | "network_unavailable"
+  | "provider_unavailable"
+  | "malformed_response"
+  | "credential_store"
+  | "cancelled";
+export interface GitHubConnectionStatus {
+  state: GitHubConnectionState;
+  account: GitHubAccount | null;
+  lastError: GitHubErrorCategory | null;
+  tokenPresent: boolean;
+  clientIdConfigured: boolean;
+}
+export interface GitHubRepositorySummary {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  htmlUrl: string;
+}
+export interface GitHubCommitSummary {
+  sha: string;
+  subject: string;
+  authorId: number | null;
+  authorLogin: string | null;
+  authoredAt: string;
+  committedAt: string;
+}
+
 export const desktop = {
   localApiStatus: () => invoke<LocalApiStatus>("local_api_status"),
   configureLocalApi: (action: LocalApiAction) => invoke<LocalApiStatus>("configure_local_api", { action }),
@@ -193,4 +245,20 @@ export const desktop = {
     invoke<void>("delete_provider_key", { providerId }),
   providerKeyStatus: () =>
     invoke<ProviderKeyStatus[]>("provider_key_status"),
+  githubConnectionStatus: () =>
+    invoke<GitHubConnectionStatus>("github_connection_status"),
+  githubSaveClientId: (clientId: string) =>
+    invoke<GitHubConnectionStatus>("github_save_client_id", { clientId }),
+  githubSignIn: () => invoke<GitHubConnectionStatus>("github_sign_in"),
+  githubCancelSignIn: () =>
+    invoke<GitHubConnectionStatus>("github_cancel_sign_in"),
+  githubDisconnect: () => invoke<GitHubConnectionStatus>("github_disconnect"),
+  githubListRepositories: () =>
+    invoke<GitHubRepositorySummary[]>("github_list_repositories"),
+  githubListCommits: (owner: string, repo: string, branch?: string) =>
+    invoke<GitHubCommitSummary[]>("github_list_commits", {
+      owner,
+      repo,
+      branch: branch || undefined,
+    }),
 };

@@ -149,6 +149,14 @@ Settings provides HUD hide/show, quota-only mode, section selection, opacity, an
 
 Use real navigation controls with current-page state, a skip-to-content link, visible focus, labeled fields, keyboard-operable dialogs with restored focus, and text alongside colors. Announce meaningful outcomes once; avoid announcing countdowns every second. External text is plain text, never executable HTML. Browser preview must remain clearly labeled and must not imply native persistence or live account access.
 
+## W5b implementation status (verified on branch `feat/workspace-github`)
+
+Implemented and parent-verified (all work under `src/`): additive typed GitHub bindings in `src/lib/desktop.ts`, a `useGitHubConnection` hook with generation-ordered mutation boundaries and friendly error-category copy, an additive `github` view (`GitHubPanel`) with connection banner, repository list, and commit list (repository picker + optional branch, plain-text subjects, author login or unattributed label, local-time commit dates, explicit loaded-count scope labels and a bounded-not-account-total footnote), a Settings → GitHub section (`GitHubSettings`) for Client ID, connect with in-progress/cancel, and disconnect with confirmation (`ConfirmDialog`), plus a skip-to-content link and additive token-based styles covering reduced-motion/reduced-transparency/forced-colors. `MiniBar`, `src/lib/miniQuota.ts`, and everything under `src-tauri/` are untouched.
+
+Checks actually run by the parent: `npm run typecheck`, `npm run lint`, `npm test` (7 files, 102 tests), `npm run build` — all passed. Live verification is outstanding: real browser authorization, repository/commit loading against the owner's account, restart-restore, and disconnect.
+
+**Wire contract note:** the Rust `GitHubConnectionState` enum serializes unit variants verbatim (`Disconnected`/`Authorizing`/`Connected`), so the frontend binds those exact strings; the status struct and summary structs use camelCase fields. Any future `rename_all` change on that enum must be coordinated across both sides.
+
 ## Acceptance checklist for later implementation
 
 - Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states.
