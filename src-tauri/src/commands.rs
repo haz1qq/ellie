@@ -22,6 +22,7 @@ use crate::{
 pub struct AppState {
     pub database_path: PathBuf,
     pub local_api: Arc<crate::local_api::LocalApi>,
+    pub github: Arc<crate::github::GitHubService>,
     pub close_to_tray: Arc<AtomicBool>,
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
@@ -286,13 +287,126 @@ pub async fn configure_local_api(
         .await)
 }
 
+fn require_github_main_window(label: &str) -> Result<(), crate::github::GitHubError> {
+    require_main_window(label).map_err(|_| crate::github::GitHubError::window_denied())
+}
+
+#[tauri::command]
+pub async fn github_connection_status(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.connection_status().await
+}
+
+#[tauri::command]
+pub async fn github_connect_start(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    client_id: String,
+    redirect_port: u16,
+) -> Result<String, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.connect_start(client_id, redirect_port)
+}
+
+#[tauri::command]
+pub async fn github_connect_complete(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    code: String,
+    state: String,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.connect_complete(code, state).await
+}
+
+#[tauri::command]
+pub async fn github_disconnect(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.disconnect().await
+}
+
+#[tauri::command]
+pub async fn github_list_repositories(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<crate::github::RepositorySummary>, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.list_repositories().await
+}
+
+#[tauri::command]
+pub async fn github_list_commits(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    owner: String,
+    repo: String,
+    branch: Option<String>,
+) -> Result<Vec<crate::github::CommitSummary>, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state
+        .github
+        .list_commits(&owner, &repo, branch.as_deref())
+        .await
+}
+
 #[cfg(test)]
 mod local_api_ipc_tests {
     #[test]
     fn only_main_window_can_manage_authentication() {
         assert!(super::require_main_window("main").is_ok());
+        assert!(super::require_github_main_window("main").is_ok());
         for label in ["mini", "", "other"] {
             assert!(super::require_main_window(label).is_err());
+            assert!(super::require_github_main_window(label).is_err());
+        }
+    }
+
+    #[test]
+    fn every_github_command_uses_the_main_window_guard() {
+        let commands_source = include_str!("commands.rs");
+        let runtime_source = include_str!("lib.rs");
+        let build_manifest = include_str!("../build.rs");
+        let main_capability = include_str!("../capabilities/main.json");
+        let mini_capability = include_str!("../capabilities/mini.json");
+        for command in [
+            "github_connection_status",
+            "github_connect_start",
+            "github_connect_complete",
+            "github_disconnect",
+            "github_list_repositories",
+            "github_list_commits",
+        ] {
+            let start = commands_source
+                .find(&format!("fn {command}"))
+                .unwrap_or_else(|| panic!("missing command {command}"));
+            let remainder = &commands_source[start..];
+            let end = remainder
+                .find("#[tauri::command]")
+                .unwrap_or(remainder.len());
+            assert!(
+                remainder[..end].contains("require_github_main_window(window.label())?"),
+                "{command} must enforce the main-window guard"
+            );
+            assert!(
+                runtime_source.contains(&format!("commands::{command}")),
+                "{command} must be registered in the invoke handler"
+            );
+            assert!(
+                build_manifest.contains(&format!("\"{command}\"")),
+                "{command} must be registered in the Tauri app manifest"
+            );
+            let permission = command.replace('_', "-");
+            assert!(
+                main_capability.contains(&format!("\"allow-{permission}\"")),
+                "{command} must be allowed only by the main capability"
+            );
+            assert!(!mini_capability.contains(&permission));
         }
     }
 }
