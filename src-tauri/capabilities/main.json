@@ -18,6 +18,7 @@
     "allow-delete-provider-key",
     "allow-provider-key-status",
     "allow-github-connection-status",
+    "allow-github-save-client-id",
     "allow-github-connect-start",
     "allow-github-connect-complete",
     "allow-github-disconnect",

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_notification_thresholds.sql"),
     include_str!("../migrations/0010_mini_floating_bar.sql"),
     include_str!("../migrations/0011_local_api.sql"),
+    include_str!("../migrations/0012_github_connection.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -427,6 +428,113 @@ mod tests {
             assert!(save_settings(&path, &invalid).is_err());
             assert_eq!(read_settings(&path)?, initial);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn schema_11_upgrade_preserves_existing_data_and_adds_github_connection(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        let connection = connect(&path)?;
+        for migration in &MIGRATIONS[..11] {
+            connection.execute_batch(migration)?;
+        }
+        connection.pragma_update(None, "user_version", 11)?;
+        connection.execute(
+            "UPDATE application_settings
+             SET close_to_tray = 0, show_mascot = 0
+             WHERE id = 1",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO providers (provider_key, display_name) VALUES (?1, ?2)",
+            params!["preserved-provider", "Preserved Provider"],
+        )?;
+        drop(connection);
+
+        let settings = initialize(&path)?;
+        assert!(!settings.close_to_tray);
+        assert!(!settings.show_mascot);
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT display_name FROM providers WHERE provider_key = ?1",
+                ["preserved-provider"],
+                |row| row.get::<_, String>(0),
+            )?,
+            "Preserved Provider"
+        );
+        assert_eq!(
+            connection.query_row("SELECT COUNT(*) FROM github_connection", [], |row| {
+                row.get::<_, i64>(0)
+            })?,
+            0
+        );
+        for table in [
+            "application_settings",
+            "providers",
+            "accounts",
+            "usage_snapshots",
+            "usage_windows",
+            "token_usage",
+            "notification_rules",
+            "notification_state",
+            "github_connection",
+        ] {
+            assert!(connection
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |_| Ok(()),
+                )
+                .is_ok());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn failed_schema_12_migration_rolls_back_and_preserves_schema_11_data(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("invalid-upgrade.sqlite3");
+        let connection = connect(&path)?;
+        for migration in &MIGRATIONS[..11] {
+            connection.execute_batch(migration)?;
+        }
+        connection.pragma_update(None, "user_version", 11)?;
+        connection.execute(
+            "UPDATE application_settings SET show_mascot = 0 WHERE id = 1",
+            [],
+        )?;
+        connection.execute_batch(
+            "CREATE TABLE github_connection (sentinel TEXT);
+             INSERT INTO github_connection VALUES ('keep');",
+        )?;
+        drop(connection);
+
+        assert!(initialize(&path).is_err());
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            11
+        );
+        assert_eq!(
+            connection.query_row("SELECT show_mascot FROM application_settings", [], |row| {
+                row.get::<_, i64>(0)
+            })?,
+            0
+        );
+        assert_eq!(
+            connection.query_row("SELECT sentinel FROM github_connection", [], |row| {
+                row.get::<_, String>(0)
+            })?,
+            "keep"
+        );
         Ok(())
     }
 

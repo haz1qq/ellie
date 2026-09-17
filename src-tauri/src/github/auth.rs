@@ -231,7 +231,7 @@ fn map_oauth_error(error: &str) -> GitHubError {
     }
 }
 
-fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
+pub(crate) fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
     if client_id.is_empty()
         || client_id.len() > 128
         || !client_id

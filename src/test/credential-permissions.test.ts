@@ -11,6 +11,7 @@ const miniCapability = JSON.parse(read("src-tauri/capabilities/mini.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 const githubCommands = [
   "github_connection_status",
+  "github_save_client_id",
   "github_connect_start",
   "github_connect_complete",
   "github_disconnect",
@@ -75,6 +76,7 @@ describe("credential IPC permissions", () => {
       "allow-delete-provider-key",
       "allow-provider-key-status",
       "allow-github-connection-status",
+      "allow-github-save-client-id",
       "allow-github-connect-start",
       "allow-github-connect-complete",
       "allow-github-disconnect",

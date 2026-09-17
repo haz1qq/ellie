@@ -17,6 +17,7 @@ fn main() {
             // Custom commands are declared here so Tauri generates their
             // least-privilege permission manifests for the main capability.
             "github_connection_status",
+            "github_save_client_id",
             "github_connect_start",
             "github_connect_complete",
             "github_disconnect",

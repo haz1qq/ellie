@@ -72,6 +72,9 @@ pub fn run() -> Result<(), AppError> {
                     github_client,
                     github::DEFAULT_API_BASE_URL,
                     Arc::new(credentials::WindowsCredentialStore),
+                    Arc::new(github::connection_store::SqliteGitHubConnectionStore::new(
+                        database_path.clone(),
+                    )),
                 )),
                 local_api: local_api::LocalApi::new(
                     database_path.clone(),
@@ -101,7 +104,7 @@ pub fn run() -> Result<(), AppError> {
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 11);
+            tracing::info!(event = "app_started", schema_version = 12);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,6 +122,7 @@ pub fn run() -> Result<(), AppError> {
             commands::delete_provider_key,
             commands::provider_key_status,
             commands::github_connection_status,
+            commands::github_save_client_id,
             commands::github_connect_start,
             commands::github_connect_complete,
             commands::github_disconnect,

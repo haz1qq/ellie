@@ -301,6 +301,16 @@ pub async fn github_connection_status(
 }
 
 #[tauri::command]
+pub async fn github_save_client_id(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    client_id: String,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.save_client_id(client_id).await
+}
+
+#[tauri::command]
 pub async fn github_connect_start(
     window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
@@ -376,6 +386,7 @@ mod local_api_ipc_tests {
         let mini_capability = include_str!("../capabilities/mini.json");
         for command in [
             "github_connection_status",
+            "github_save_client_id",
             "github_connect_start",
             "github_connect_complete",
             "github_disconnect",

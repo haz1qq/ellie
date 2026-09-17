@@ -139,6 +139,25 @@ Tests use sanitized fixtures and local `127.0.0.1` mock servers only; only produ
 
 Nothing in this section is a claim about live GitHub behavior.
 
+## W2b implementation status (verified on branch `feat/workspace-github`)
+
+Implemented and parent-verified: schema 12 `github_connection` singleton migration (non-secret `client_id`, optional account id/login, UTC timestamp) with a populated schema-11 upgrade test; `GitHubConnectionStore` trait with strict SQLite and in-memory implementations; lazy session restore from the stored refresh token (no network and no startup delay — the first API call performs the refresh); `github_save_client_id` main-window-only IPC that resets the session and deletes the refresh token when the client ID changes; connection-record persistence after `connect_complete` with fail-closed semantics; 15-minute authorization expiry with an injected clock; and a `clientIdConfigured` status field. `mini.json`, frontend production code, docs, and Cargo dependencies are unchanged.
+
+Checks actually run by the parent and their results:
+
+| Command | Result |
+| --- | --- |
+| `cd src-tauri && cargo fmt --check` | passed |
+| `cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings` | passed |
+| `cd src-tauri && cargo test` | passed: 116 library tests, 32 `ellie-cli` tests, 0 failed |
+| `npm run typecheck` / `npm run lint` | passed |
+| `npm test` | passed: 5 files, 72 tests |
+| `npm run build` | passed |
+
+A scan confirmed the owner's real Client ID appears nowhere in the repository; only sanitized values such as `Iv1.sanitized-client` are used. The real Client ID lives only in the user's runtime settings via `github_save_client_id`.
+
+**Remaining gaps (recorded, not yet implemented):** repository selection/cache persistence and commit coverage tables from the design are not yet built (commits are fetched on demand); no GitHub events exist; no UI consumes these commands (W5); live GitHub App authorization, real Windows Credential Manager writes, and refresh-token rotation are still unverified; and a connection-persistence failure keeps the in-memory session and refresh token while reporting `Disconnected` so the next `connect_complete` retry can succeed (tested).
+
 ## Acceptance and remaining decisions
 
 Follow W1–W6 in the parent plan; this document does not renumber or combine them. Each phase requires explicit implementation authorization and the repository-defined checks.

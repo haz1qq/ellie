@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod connection_store;
 pub mod models;
 
 use std::{
@@ -10,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::Utc;
 use reqwest::{
     header::{self, HeaderMap},
     Client, StatusCode, Url,
@@ -18,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::credentials::SecretStore;
 use auth::TokenSet;
+use connection_store::{GitHubConnectionStore, StoredConnection};
 use models::{
     parse_commits, parse_repositories, parse_user, validate_branch, validate_repository_identifier,
     BoundedPagination,
@@ -35,6 +38,7 @@ const DEFAULT_PAGE_SIZE: usize = 100;
 const DEFAULT_MAX_PAGES: usize = 5;
 const DEFAULT_MAX_ROWS: usize = 500;
 const ACCESS_TOKEN_EXPIRY_MARGIN: Duration = Duration::from_secs(30);
+const AUTHORIZATION_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
 const STATE_DISCONNECTED: u8 = 0;
 const STATE_AUTHORIZING: u8 = 1;
@@ -181,10 +185,12 @@ pub struct GitHubConnectionStatus {
     pub account: Option<GitHubAccount>,
     pub last_error: Option<GitHubErrorCategory>,
     pub token_present: bool,
+    pub client_id_configured: bool,
 }
 
 #[derive(Default)]
 struct ConnectionRecord {
+    client_id: Option<String>,
     account: Option<GitHubAccount>,
     last_error: Option<GitHubErrorCategory>,
 }
@@ -195,6 +201,7 @@ struct PendingAuthorization {
     verifier: String,
     state: String,
     generation: u64,
+    expires_at: Instant,
 }
 
 struct AccessSession {
@@ -227,11 +234,15 @@ pub struct GitHubService {
     api_base_url: String,
     auth_base_url: String,
     secret_store: Arc<dyn SecretStore>,
+    connection_store: Arc<dyn GitHubConnectionStore>,
     connection_state: AtomicU8,
     generation: AtomicU64,
     connection: Mutex<ConnectionRecord>,
     pending: Mutex<Option<PendingAuthorization>>,
     access_session: tokio::sync::Mutex<Option<AccessSession>>,
+    restore_lock: tokio::sync::Mutex<()>,
+    authorization_now: Arc<dyn Fn() -> Instant + Send + Sync>,
+    authorization_lifetime: Duration,
     limits: ServiceLimits,
 }
 
@@ -240,8 +251,15 @@ impl GitHubService {
         client: Client,
         api_base_url: impl Into<String>,
         secret_store: Arc<dyn SecretStore>,
+        connection_store: Arc<dyn GitHubConnectionStore>,
     ) -> Self {
-        Self::with_auth_base(client, api_base_url, DEFAULT_AUTH_BASE_URL, secret_store)
+        Self::with_auth_base(
+            client,
+            api_base_url,
+            DEFAULT_AUTH_BASE_URL,
+            secret_store,
+            connection_store,
+        )
     }
 
     fn with_auth_base(
@@ -249,23 +267,30 @@ impl GitHubService {
         api_base_url: impl Into<String>,
         auth_base_url: impl Into<String>,
         secret_store: Arc<dyn SecretStore>,
+        connection_store: Arc<dyn GitHubConnectionStore>,
     ) -> Self {
         Self {
             client,
             api_base_url: api_base_url.into().trim_end_matches('/').to_string(),
             auth_base_url: auth_base_url.into().trim_end_matches('/').to_string(),
             secret_store,
+            connection_store,
             connection_state: AtomicU8::new(STATE_DISCONNECTED),
             generation: AtomicU64::new(0),
             connection: Mutex::new(ConnectionRecord::default()),
             pending: Mutex::new(None),
             access_session: tokio::sync::Mutex::new(None),
+            restore_lock: tokio::sync::Mutex::new(()),
+            authorization_now: Arc::new(Instant::now),
+            authorization_lifetime: AUTHORIZATION_LIFETIME,
             limits: ServiceLimits::default(),
         }
     }
 
     pub async fn connection_status(&self) -> Result<GitHubConnectionStatus, GitHubError> {
+        self.restore_if_needed().await?;
         let token_present = self.read_refresh_token().await?.is_some();
+        let client_id_configured = self.load_connection().await?.is_some();
         let connection = self
             .connection
             .lock()
@@ -275,7 +300,172 @@ impl GitHubService {
             account: connection.account.clone(),
             last_error: connection.last_error,
             token_present,
+            client_id_configured,
         })
+    }
+
+    pub async fn restore_if_needed(&self) -> Result<(), GitHubError> {
+        if self.state() != GitHubConnectionState::Disconnected
+            || self
+                .pending
+                .lock()
+                .map_err(|_| GitHubError::provider_unavailable())?
+                .is_some()
+            || self.access_session.lock().await.is_some()
+        {
+            return Ok(());
+        }
+
+        let _restore_guard = self.restore_lock.lock().await;
+        if self.state() != GitHubConnectionState::Disconnected
+            || self
+                .pending
+                .lock()
+                .map_err(|_| GitHubError::provider_unavailable())?
+                .is_some()
+            || self.access_session.lock().await.is_some()
+        {
+            return Ok(());
+        }
+
+        let generation = self.generation.load(Ordering::SeqCst);
+        if self.read_refresh_token().await?.is_none() {
+            return Ok(());
+        }
+        let Some(stored) = self.load_connection().await? else {
+            return Ok(());
+        };
+        if self.generation.load(Ordering::SeqCst) != generation
+            || self.state() != GitHubConnectionState::Disconnected
+            || self
+                .pending
+                .lock()
+                .map_err(|_| GitHubError::provider_unavailable())?
+                .is_some()
+        {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        let refresh_expires_at = now
+            .checked_add(Duration::from_secs(auth::REFRESH_TOKEN_LIFETIME_SECONDS))
+            .ok_or_else(GitHubError::malformed_response)?;
+        *self.access_session.lock().await = Some(AccessSession {
+            client_id: stored.client_id.clone(),
+            access_token: String::new(),
+            access_expires_at: now,
+            refresh_expires_at,
+            generation,
+        });
+        {
+            let mut connection = self
+                .connection
+                .lock()
+                .map_err(|_| GitHubError::provider_unavailable())?;
+            *connection = ConnectionRecord {
+                client_id: Some(stored.client_id),
+                account: stored.account,
+                last_error: None,
+            };
+        }
+        if self
+            .connection_state
+            .compare_exchange(
+                STATE_DISCONNECTED,
+                STATE_CONNECTED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+            || self.generation.load(Ordering::SeqCst) != generation
+        {
+            let mut session = self.access_session.lock().await;
+            if session
+                .as_ref()
+                .is_some_and(|session| session.generation == generation)
+            {
+                *session = None;
+            }
+            let _ = self.connection_state.compare_exchange(
+                STATE_CONNECTED,
+                STATE_DISCONNECTED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn save_client_id(
+        &self,
+        client_id: String,
+    ) -> Result<GitHubConnectionStatus, GitHubError> {
+        auth::validate_client_id(&client_id)?;
+        let stored = self.load_connection().await?;
+        let active_client_id = self
+            .access_session
+            .lock()
+            .await
+            .as_ref()
+            .map(|session| session.client_id.clone());
+        let token_present = self.read_refresh_token().await?.is_some();
+        let connection_account = self
+            .connection
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .account
+            .clone();
+        let has_connection = stored
+            .as_ref()
+            .and_then(|value| value.account.as_ref())
+            .is_some()
+            || active_client_id.is_some()
+            || token_present
+            || self.state() == GitHubConnectionState::Connected;
+        let mismatched = stored
+            .as_ref()
+            .is_some_and(|value| value.client_id != client_id)
+            || active_client_id
+                .as_ref()
+                .is_some_and(|active| active != &client_id);
+        let reset_session = has_connection && mismatched;
+        let account = if reset_session {
+            None
+        } else {
+            connection_account.or_else(|| stored.and_then(|value| value.account))
+        };
+        self.save_connection(StoredConnection {
+            client_id: client_id.clone(),
+            account: account.clone(),
+            updated_at: Utc::now(),
+        })
+        .await?;
+
+        if reset_session {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.connection_state
+                .store(STATE_DISCONNECTED, Ordering::SeqCst);
+            if let Ok(mut pending) = self.pending.lock() {
+                *pending = None;
+            }
+            *self.access_session.lock().await = None;
+            if let Ok(mut connection) = self.connection.lock() {
+                *connection = ConnectionRecord {
+                    client_id: Some(client_id),
+                    account: None,
+                    last_error: None,
+                };
+            }
+            let token_result = self.delete_refresh_token().await;
+            let account_result = self.clear_stored_account().await;
+            token_result?;
+            account_result?;
+        } else if let Ok(mut connection) = self.connection.lock() {
+            connection.client_id = Some(client_id);
+            connection.account = account;
+            connection.last_error = None;
+        }
+        self.connection_status().await
     }
 
     pub fn connect_start(
@@ -283,6 +473,7 @@ impl GitHubService {
         client_id: String,
         redirect_port: u16,
     ) -> Result<String, GitHubError> {
+        self.reset_expired_pending()?;
         self.connection_state
             .compare_exchange(
                 STATE_DISCONNECTED,
@@ -303,12 +494,16 @@ impl GitHubService {
                 &state,
             )?;
             let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let expires_at = (self.authorization_now)()
+                .checked_add(self.authorization_lifetime)
+                .ok_or_else(GitHubError::provider_unavailable)?;
             let pending = PendingAuthorization {
                 client_id,
                 redirect_uri,
                 verifier: pkce.verifier,
                 state,
                 generation,
+                expires_at,
             };
             *self
                 .pending
@@ -345,6 +540,15 @@ impl GitHubService {
                 self.record_error(error.category());
                 return Err(error);
             };
+            if pending.expires_at <= (self.authorization_now)() {
+                *pending_guard = None;
+                self.generation.fetch_add(1, Ordering::SeqCst);
+                self.connection_state
+                    .store(STATE_DISCONNECTED, Ordering::SeqCst);
+                let error = GitHubError::cancelled();
+                self.record_error(error.category());
+                return Err(error);
+            }
             if !auth::state_matches(&pending.state, &returned_state) {
                 let error = GitHubError::state_mismatch();
                 self.record_error(error.category());
@@ -393,16 +597,24 @@ impl GitHubService {
             return Err(GitHubError::cancelled());
         }
 
-        let session = session_from_tokens(pending.client_id, pending.generation, tokens)?;
+        let client_id = pending.client_id;
+        let session = session_from_tokens(client_id.clone(), pending.generation, tokens)?;
         *self.access_session.lock().await = Some(session);
         {
             let mut connection = self
                 .connection
                 .lock()
                 .map_err(|_| GitHubError::provider_unavailable())?;
-            connection.account = Some(user);
+            connection.client_id = Some(client_id.clone());
+            connection.account = Some(user.clone());
             connection.last_error = None;
         }
+        self.save_connection(StoredConnection {
+            client_id,
+            account: Some(user),
+            updated_at: Utc::now(),
+        })
+        .await?;
         if self
             .connection_state
             .compare_exchange(
@@ -418,6 +630,7 @@ impl GitHubService {
                 connection.account = None;
             }
             let _ = self.delete_refresh_token().await;
+            let _ = self.clear_stored_account().await;
             return Err(GitHubError::cancelled());
         }
         Ok(())
@@ -435,7 +648,9 @@ impl GitHubService {
             *connection = ConnectionRecord::default();
         }
 
-        if let Err(error) = self.delete_refresh_token().await {
+        let token_result = self.delete_refresh_token().await;
+        let account_result = self.clear_stored_account().await;
+        if let Err(error) = token_result.and(account_result) {
             self.record_error(error.category());
             return Err(error);
         }
@@ -444,6 +659,7 @@ impl GitHubService {
 
     pub async fn get_user(&self) -> Result<GitHubAccount, GitHubError> {
         let result = async {
+            self.restore_if_needed().await?;
             let url = self.api_url("/user")?;
             let response = self.authorized_get(url).await?;
             parse_user(&response.body)
@@ -460,6 +676,7 @@ impl GitHubService {
     }
 
     async fn list_repositories_inner(&self) -> Result<Vec<RepositorySummary>, GitHubError> {
+        self.restore_if_needed().await?;
         let mut output = Vec::new();
         let mut pagination = BoundedPagination::new(self.limits.max_pages, self.limits.max_rows);
         loop {
@@ -496,6 +713,7 @@ impl GitHubService {
         repository: &str,
         branch: Option<&str>,
     ) -> Result<Vec<CommitSummary>, GitHubError> {
+        self.restore_if_needed().await?;
         validate_repository_identifier(owner)?;
         validate_repository_identifier(repository)?;
         if let Some(branch) = branch {
@@ -673,6 +891,23 @@ impl GitHubService {
         Ok(url)
     }
 
+    fn reset_expired_pending(&self) -> Result<(), GitHubError> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?;
+        if pending
+            .as_ref()
+            .is_some_and(|pending| pending.expires_at <= (self.authorization_now)())
+        {
+            *pending = None;
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.connection_state
+                .store(STATE_DISCONNECTED, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
     fn state(&self) -> GitHubConnectionState {
         match self.connection_state.load(Ordering::SeqCst) {
             STATE_AUTHORIZING => GitHubConnectionState::Authorizing,
@@ -711,6 +946,27 @@ impl GitHubService {
             }
             Err(error) => self.record_error(error.category()),
         }
+    }
+
+    async fn load_connection(&self) -> Result<Option<StoredConnection>, GitHubError> {
+        let store = Arc::clone(&self.connection_store);
+        tokio::task::spawn_blocking(move || store.load())
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
+    async fn save_connection(&self, connection: StoredConnection) -> Result<(), GitHubError> {
+        let store = Arc::clone(&self.connection_store);
+        tokio::task::spawn_blocking(move || store.save(&connection))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
+    async fn clear_stored_account(&self) -> Result<(), GitHubError> {
+        let store = Arc::clone(&self.connection_store);
+        tokio::task::spawn_blocking(move || store.clear_account())
+            .await
+            .map_err(|_| GitHubError::credential_store())?
     }
 
     async fn read_refresh_token(&self) -> Result<Option<String>, GitHubError> {
@@ -859,6 +1115,7 @@ fn is_authentication_failure(category: GitHubErrorCategory) -> bool {
 mod tests {
     use super::*;
     use crate::credentials::{MemoryStore, SecretStore};
+    use connection_store::MemoryGitHubConnectionStore;
     use std::sync::Mutex as StdMutex;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -870,6 +1127,22 @@ mod tests {
         status: &'static str,
         headers: &'static str,
         body: String,
+    }
+
+    struct FailingSaveConnectionStore;
+
+    impl GitHubConnectionStore for FailingSaveConnectionStore {
+        fn load(&self) -> Result<Option<StoredConnection>, GitHubError> {
+            Ok(None)
+        }
+
+        fn save(&self, _connection: &StoredConnection) -> Result<(), GitHubError> {
+            Err(GitHubError::credential_store())
+        }
+
+        fn clear_account(&self) -> Result<(), GitHubError> {
+            Ok(())
+        }
     }
 
     async fn serve_sequence(
@@ -917,7 +1190,27 @@ mod tests {
         store: Arc<dyn SecretStore>,
         limits: ServiceLimits,
     ) -> GitHubService {
-        let mut service = GitHubService::with_auth_base(test_client(), base_url, base_url, store);
+        test_service_with_connection(
+            base_url,
+            store,
+            Arc::new(MemoryGitHubConnectionStore::default()),
+            limits,
+        )
+    }
+
+    fn test_service_with_connection(
+        base_url: &str,
+        store: Arc<dyn SecretStore>,
+        connection_store: Arc<dyn GitHubConnectionStore>,
+        limits: ServiceLimits,
+    ) -> GitHubService {
+        let mut service = GitHubService::with_auth_base(
+            test_client(),
+            base_url,
+            base_url,
+            store,
+            connection_store,
+        );
         service.limits = limits;
         service
     }
@@ -934,13 +1227,23 @@ mod tests {
             refresh_expires_at: Instant::now() + Duration::from_secs(86_400),
             generation,
         });
+        let account = GitHubAccount {
+            id: 42,
+            login: "octo-cat".to_string(),
+        };
         *service.connection.lock().expect("connection") = ConnectionRecord {
-            account: Some(GitHubAccount {
-                id: 42,
-                login: "octo-cat".to_string(),
-            }),
+            client_id: Some("Iv1.sanitized-client".to_string()),
+            account: Some(account.clone()),
             last_error: None,
         };
+        service
+            .save_connection(StoredConnection {
+                client_id: "Iv1.sanitized-client".to_string(),
+                account: Some(account),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("stored connection");
         service
             .connection_state
             .store(STATE_CONNECTED, Ordering::SeqCst);
@@ -991,6 +1294,14 @@ mod tests {
         }
         assert_eq!(status.account.expect("account").login, "octo-cat");
         assert!(status.token_present);
+        assert!(status.client_id_configured);
+        let persisted = service
+            .load_connection()
+            .await
+            .expect("load connection")
+            .expect("persisted connection");
+        assert_eq!(persisted.client_id, "Iv1.sanitized-client");
+        assert_eq!(persisted.account.expect("persisted account").id, 42);
         assert_eq!(
             store
                 .get(REFRESH_TOKEN_ACCOUNT)
@@ -1006,6 +1317,65 @@ mod tests {
         assert!(requests[1]
             .to_ascii_lowercase()
             .contains("authorization: bearer ghu_sanitized_access_value"));
+    }
+
+    #[tokio::test]
+    async fn connection_persistence_failure_is_closed_but_keeps_the_retry_session() {
+        let (base, _, server) = serve_sequence(vec![
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"access_token":"ghu_sanitized_access_value","expires_in":28800,"refresh_token":"ghr_sanitized_refresh_value","refresh_token_expires_in":15897600,"token_type":"bearer"}"#.to_string(),
+            },
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"id":42,"login":"octo-cat"}"#.to_string(),
+            },
+        ])
+        .await;
+        let secrets = Arc::new(MemoryStore::default());
+        let service = test_service_with_connection(
+            &base,
+            secrets.clone(),
+            Arc::new(FailingSaveConnectionStore),
+            ServiceLimits::default(),
+        );
+        let authorize_url = service
+            .connect_start("Iv1.sanitized-client".to_string(), 58210)
+            .expect("connect start");
+        let returned_state = Url::parse(&authorize_url)
+            .expect("authorize URL")
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("state");
+
+        let error = service
+            .connect_complete("sanitized-code".to_string(), returned_state)
+            .await
+            .expect_err("connection persistence failure");
+        server.await.expect("mock server");
+        assert_eq!(error.category(), GitHubErrorCategory::CredentialStore);
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+        assert!(service.access_session.lock().await.is_some());
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .expect("in-memory connection")
+                .account
+                .as_ref()
+                .map(|account| account.id),
+            Some(42)
+        );
+        assert_eq!(
+            secrets
+                .get(REFRESH_TOKEN_ACCOUNT)
+                .expect("refresh token retained")
+                .as_deref(),
+            Some("ghr_sanitized_refresh_value")
+        );
     }
 
     #[tokio::test]
@@ -1107,6 +1477,196 @@ mod tests {
             GitHubErrorCategory::AuthorizationStateMismatch
         );
         assert_eq!(service.state(), GitHubConnectionState::Authorizing);
+    }
+
+    #[tokio::test]
+    async fn restores_without_network_and_refreshes_on_the_first_api_call() {
+        let (base, requests, server) = serve_sequence(vec![
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"access_token":"ghu_restored_access_value","expires_in":28800,"refresh_token":"ghr_restored_refresh_value","refresh_token_expires_in":15897600,"token_type":"bearer"}"#.to_string(),
+            },
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: r#"{"id":42,"login":"octo-cat"}"#.to_string(),
+            },
+        ])
+        .await;
+        let secrets = Arc::new(MemoryStore::default());
+        secrets
+            .set(REFRESH_TOKEN_ACCOUNT, "ghr_sanitized_refresh_value")
+            .expect("refresh token");
+        let connections = Arc::new(MemoryGitHubConnectionStore::default());
+        connections
+            .save(&StoredConnection {
+                client_id: "Iv1.sanitized-client".to_string(),
+                account: Some(GitHubAccount {
+                    id: 42,
+                    login: "octo-cat".to_string(),
+                }),
+                updated_at: Utc::now(),
+            })
+            .expect("stored connection");
+        let service = test_service_with_connection(
+            &base,
+            secrets.clone(),
+            connections,
+            ServiceLimits::default(),
+        );
+
+        let status = service.connection_status().await.expect("restore status");
+        assert_eq!(status.state, GitHubConnectionState::Connected);
+        assert_eq!(status.account.expect("restored account").login, "octo-cat");
+        assert!(status.client_id_configured);
+        assert!(requests
+            .lock()
+            .expect("requests before API call")
+            .is_empty());
+
+        let account = service.get_user().await.expect("first restored API call");
+        server.await.expect("mock server");
+        assert_eq!(account.id, 42);
+        let requests = requests.lock().expect("requests");
+        assert!(requests[0].starts_with("POST /login/oauth/access_token"));
+        assert!(requests[0].contains("grant_type=refresh_token"));
+        assert!(requests[1].starts_with("GET /user"));
+        assert_eq!(
+            secrets
+                .get(REFRESH_TOKEN_ACCOUNT)
+                .expect("rotated refresh token")
+                .as_deref(),
+            Some("ghr_restored_refresh_value")
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_requires_both_refresh_token_and_stored_client_id() {
+        let connection = StoredConnection {
+            client_id: "Iv1.sanitized-client".to_string(),
+            account: Some(GitHubAccount {
+                id: 42,
+                login: "octo-cat".to_string(),
+            }),
+            updated_at: Utc::now(),
+        };
+
+        let no_token_connections = Arc::new(MemoryGitHubConnectionStore::default());
+        no_token_connections
+            .save(&connection)
+            .expect("stored connection");
+        let no_token = test_service_with_connection(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            no_token_connections,
+            ServiceLimits::default(),
+        );
+        let status = no_token.connection_status().await.expect("status");
+        assert_eq!(status.state, GitHubConnectionState::Disconnected);
+        assert!(status.client_id_configured);
+        assert!(no_token.access_session.lock().await.is_none());
+
+        let token_only_secrets = Arc::new(MemoryStore::default());
+        token_only_secrets
+            .set(REFRESH_TOKEN_ACCOUNT, "ghr_sanitized_refresh_value")
+            .expect("refresh token");
+        let token_only = test_service(
+            "http://127.0.0.1:9",
+            token_only_secrets,
+            ServiceLimits::default(),
+        );
+        let status = token_only.connection_status().await.expect("status");
+        assert_eq!(status.state, GitHubConnectionState::Disconnected);
+        assert!(!status.client_id_configured);
+        assert!(token_only.access_session.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn saving_a_different_client_id_resets_the_connected_session() {
+        let secrets = Arc::new(MemoryStore::default());
+        let connections = Arc::new(MemoryGitHubConnectionStore::default());
+        let service = test_service_with_connection(
+            "http://127.0.0.1:9",
+            secrets.clone(),
+            connections.clone(),
+            ServiceLimits::default(),
+        );
+        mark_connected(&service, secrets.as_ref()).await;
+
+        let status = service
+            .save_client_id("Iv1.sanitized-replacement".to_string())
+            .await
+            .expect("save replacement client id");
+        assert_eq!(status.state, GitHubConnectionState::Disconnected);
+        assert!(status.client_id_configured);
+        assert!(!status.token_present);
+        assert_eq!(status.account, None);
+        assert!(service.access_session.lock().await.is_none());
+        assert_eq!(secrets.get(REFRESH_TOKEN_ACCOUNT).expect("token"), None);
+        let stored = connections
+            .load()
+            .expect("connection")
+            .expect("stored client id");
+        assert_eq!(stored.client_id, "Iv1.sanitized-replacement");
+        assert_eq!(stored.account, None);
+    }
+
+    #[tokio::test]
+    async fn status_reports_a_saved_client_id_without_a_connection() {
+        let service = test_service(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            ServiceLimits::default(),
+        );
+        let status = service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("save client id");
+        assert!(status.client_id_configured);
+        assert_eq!(status.state, GitHubConnectionState::Disconnected);
+        assert!(!status.token_present);
+    }
+
+    #[tokio::test]
+    async fn expired_pending_authorization_is_replaced_on_start_and_cancelled_on_complete() {
+        let now = Arc::new(StdMutex::new(Instant::now()));
+        let mut service = test_service(
+            "http://127.0.0.1:9",
+            Arc::new(MemoryStore::default()),
+            ServiceLimits::default(),
+        );
+        let clock = Arc::clone(&now);
+        service.authorization_now = Arc::new(move || *clock.lock().expect("test clock"));
+
+        service
+            .connect_start("Iv1.sanitized-client".to_string(), 58210)
+            .expect("first start");
+        *now.lock().expect("test clock") += AUTHORIZATION_LIFETIME + Duration::from_secs(1);
+        service
+            .connect_start("Iv1.sanitized-client".to_string(), 58210)
+            .expect("expired authorization is replaced");
+
+        let returned_state = service
+            .pending
+            .lock()
+            .expect("pending authorization")
+            .as_ref()
+            .expect("replacement authorization")
+            .state
+            .clone();
+        *now.lock().expect("test clock") += AUTHORIZATION_LIFETIME + Duration::from_secs(1);
+        let error = service
+            .connect_complete("sanitized-code".to_string(), returned_state)
+            .await
+            .expect_err("expired completion");
+        assert_eq!(error.category(), GitHubErrorCategory::Cancelled);
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+        assert!(service
+            .pending
+            .lock()
+            .expect("pending authorization")
+            .is_none());
     }
 
     #[tokio::test]
@@ -1280,9 +1840,11 @@ mod tests {
             Some("ghr_sanitized_refresh_value")
         );
 
-        let service = test_service(
+        let connections = Arc::new(MemoryGitHubConnectionStore::default());
+        let service = test_service_with_connection(
             "http://127.0.0.1:9",
             store.clone(),
+            connections.clone(),
             ServiceLimits::default(),
         );
         mark_connected(&service, store.as_ref()).await;
@@ -1290,8 +1852,15 @@ mod tests {
         assert_eq!(status.state, GitHubConnectionState::Disconnected);
         assert_eq!(status.account, None);
         assert!(!status.token_present);
+        assert!(status.client_id_configured);
         assert_eq!(store.get(REFRESH_TOKEN_ACCOUNT).expect("deleted"), None);
         assert!(service.access_session.lock().await.is_none());
+        let persisted = connections
+            .load()
+            .expect("stored connection")
+            .expect("client id remains");
+        assert_eq!(persisted.client_id, "Iv1.sanitized-client");
+        assert_eq!(persisted.account, None);
     }
 
     #[tokio::test]

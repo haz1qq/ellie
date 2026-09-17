@@ -93,14 +93,24 @@ pub(crate) fn parse_commits(body: &[u8]) -> Result<Vec<CommitSummary>, GitHubErr
 }
 
 fn sanitize_user(raw: RawGitHubUser) -> Result<GitHubAccount, GitHubError> {
-    if raw.id == 0 {
+    validate_account(GitHubAccount {
+        id: raw.id,
+        login: raw.login,
+    })
+}
+
+pub(crate) fn validate_account(account: GitHubAccount) -> Result<GitHubAccount, GitHubError> {
+    if account.id == 0 {
         return Err(GitHubError::malformed_response());
     }
-    let login = sanitize_required_text(&raw.login, MAX_LOGIN_CHARS, false)?;
+    let login = sanitize_required_text(&account.login, MAX_LOGIN_CHARS, false)?;
     if login.contains(['/', '\\']) {
         return Err(GitHubError::malformed_response());
     }
-    Ok(GitHubAccount { id: raw.id, login })
+    Ok(GitHubAccount {
+        id: account.id,
+        login,
+    })
 }
 
 fn sanitize_repository(raw: RawRepository) -> Result<RepositorySummary, GitHubError> {
