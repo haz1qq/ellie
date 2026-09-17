@@ -1,5 +1,7 @@
 # Architecture
 
+For the **proposed, not implemented** workspace expansion, see [backend design](workspace-backend.md) and the [W1–W6 upgrade plan](workspace-upgrade.md). GitHub and local tasks remain separate domains from AI usage. The architecture below describes existing behavior.
+
 The Tauri 2 executable owns application lifecycle, the Windows tray, settings, SQLite, and the provider framework. React consumes narrow Rust commands through `src/lib/desktop.ts`. The frontend does not receive filesystem paths, raw database access, or provider authentication.
 
 | Module | Responsibility |

@@ -16,6 +16,12 @@
     "allow-refresh-provider",
     "allow-save-provider-key",
     "allow-delete-provider-key",
-    "allow-provider-key-status"
+    "allow-provider-key-status",
+    "allow-github-connection-status",
+    "allow-github-connect-start",
+    "allow-github-connect-complete",
+    "allow-github-disconnect",
+    "allow-github-list-repositories",
+    "allow-github-list-commits"
   ]
 }

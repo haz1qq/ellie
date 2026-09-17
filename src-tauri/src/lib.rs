@@ -3,6 +3,7 @@ mod api;
 mod commands;
 pub mod credentials;
 pub mod error;
+pub mod github;
 pub mod history;
 mod local_api;
 pub mod local_api_token;
@@ -57,8 +58,21 @@ pub fn run() -> Result<(), AppError> {
                     storage::initialize(&path)
                 }))
                 .map_err(|_| AppError::Background)??;
+            let github_client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .user_agent(format!("ellie/{}", env!("CARGO_PKG_VERSION")))
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .https_only(true)
+                .build()
+                .map_err(|_| AppError::Startup)?;
             app.manage(AppState {
                 database_path: database_path.clone(),
+                github: Arc::new(github::GitHubService::new(
+                    github_client,
+                    github::DEFAULT_API_BASE_URL,
+                    Arc::new(credentials::WindowsCredentialStore),
+                )),
                 local_api: local_api::LocalApi::new(
                     database_path.clone(),
                     Arc::new(credentials::WindowsCredentialStore),
@@ -103,7 +117,13 @@ pub fn run() -> Result<(), AppError> {
             commands::refresh_provider,
             commands::save_provider_key,
             commands::delete_provider_key,
-            commands::provider_key_status
+            commands::provider_key_status,
+            commands::github_connection_status,
+            commands::github_connect_start,
+            commands::github_connect_complete,
+            commands::github_disconnect,
+            commands::github_list_repositories,
+            commands::github_list_commits
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" {

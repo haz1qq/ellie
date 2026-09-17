@@ -14,6 +14,14 @@ fn main() {
             "save_provider_key",
             "delete_provider_key",
             "provider_key_status",
+            // Custom commands are declared here so Tauri generates their
+            // least-privilege permission manifests for the main capability.
+            "github_connection_status",
+            "github_connect_start",
+            "github_connect_complete",
+            "github_disconnect",
+            "github_list_repositories",
+            "github_list_commits",
         ]),
     ))
     .expect("failed to build Ellie application resources");

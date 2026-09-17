@@ -4,6 +4,12 @@ One place to see how much AI you have left.
 
 Ellie is a lightweight, local-first Windows tray app with a quiet black-and-white cat personality. **Milestone 0 is complete**, with automated checks passed and Windows smoke checks confirmed by the owner. The shell does not connect to providers or show sample quota values.
 
+## Planned workspace upgrade
+
+**Design only — not implemented:** GitHub repository and commit tracking, repository creation, local to-do lists, an improved dashboard, and an expanded optional HUD. Existing AI monitoring remains part of Ellie.
+
+Start with the [upgrade plan](docs/workspace-upgrade.md), then the [dashboard/HUD design](docs/workspace-interface.md) and [backend/security design](docs/workspace-backend.md). GitHub authentication and permissions remain a feasibility gate before implementation.
+
 ## Development
 
 Prerequisites: Windows 10/11, Microsoft C++ Build Tools with Desktop development with C++, WebView2, Rust (MSVC toolchain), Node.js 22.14 or later, and npm 10 or later. See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).

@@ -9,6 +9,14 @@ const desktop = read("src/lib/desktop.ts");
 const capability = JSON.parse(read("src-tauri/capabilities/main.json"));
 const miniCapability = JSON.parse(read("src-tauri/capabilities/mini.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
+const githubCommands = [
+  "github_connection_status",
+  "github_connect_start",
+  "github_connect_complete",
+  "github_disconnect",
+  "github_list_repositories",
+  "github_list_commits",
+];
 
 // Mocked invoke calls cannot catch missing native permissions. Keep all
 // parts of each native IPC route aligned, without accessing any secrets.
@@ -31,6 +39,21 @@ describe("credential IPC permissions", () => {
     );
   });
 
+  it.each(githubCommands)(
+    "allows backend-only %s through the native main-window boundary",
+    (command) => {
+      expect(handler).toContain(`commands::${command}`);
+      const commands = manifest.match(/\.commands\(&\[([\s\S]*?)\]\)/)?.[1];
+      expect(commands).toContain(`"${command}"`);
+      expect(capability.permissions).toContain(
+        `allow-${command.replaceAll("_", "-")}`,
+      );
+      expect(miniCapability.permissions).not.toContain(
+        `allow-${command.replaceAll("_", "-")}`,
+      );
+    },
+  );
+
   it("keeps access scoped to the local main window", () => {
     expect(config.app.security.capabilities).toEqual(["main", "mini"]);
     expect(capability.identifier).toBe("main");
@@ -51,6 +74,12 @@ describe("credential IPC permissions", () => {
       "allow-save-provider-key",
       "allow-delete-provider-key",
       "allow-provider-key-status",
+      "allow-github-connection-status",
+      "allow-github-connect-start",
+      "allow-github-connect-complete",
+      "allow-github-disconnect",
+      "allow-github-list-repositories",
+      "allow-github-list-commits",
     ]);
   });
 
@@ -91,6 +120,9 @@ describe("credential IPC permissions", () => {
       "allow-save-provider-key",
       "allow-delete-provider-key",
       "allow-provider-key-status",
+      ...githubCommands.map(
+        (command) => `allow-${command.replaceAll("_", "-")}`,
+      ),
     ]) {
       expect(miniCapability.permissions).not.toContain(forbidden);
     }
