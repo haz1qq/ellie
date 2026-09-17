@@ -8,6 +8,7 @@ vi.mock("../lib/desktop", () => ({
   desktop: {
     githubConnectionStatus: vi.fn(),
     githubSaveClientId: vi.fn(),
+    githubSaveClientSecret: vi.fn(),
     githubSignIn: vi.fn(),
     githubCancelSignIn: vi.fn(),
     githubDisconnect: vi.fn(),
@@ -22,6 +23,7 @@ const disconnected: GitHubConnectionStatus = {
   lastError: null,
   tokenPresent: false,
   clientIdConfigured: true,
+  clientSecretConfigured: true,
 };
 const connected: GitHubConnectionStatus = {
   state: "Connected",
@@ -29,6 +31,7 @@ const connected: GitHubConnectionStatus = {
   lastError: null,
   tokenPresent: true,
   clientIdConfigured: true,
+  clientSecretConfigured: true,
 };
 const authorizing: GitHubConnectionStatus = {
   state: "Authorizing",
@@ -36,6 +39,7 @@ const authorizing: GitHubConnectionStatus = {
   lastError: null,
   tokenPresent: false,
   clientIdConfigured: true,
+  clientSecretConfigured: true,
 };
 const repositories: GitHubRepositorySummary[] = [
   {
@@ -105,15 +109,18 @@ describe("GitHub connection banner", () => {
     expect(screen.queryByText(/Connected as @octo-cat/)).toBeNull(); // no invented login
   });
 
-  it("gates connecting until a Client ID is configured and explains why", async () => {
+  it("gates connecting until both App credentials are configured and explains why", async () => {
     vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
       ...disconnected,
       clientIdConfigured: false,
+      clientSecretConfigured: false,
     });
     render(<GitHubPanel native />);
     const connect = await screen.findByRole("button", { name: "Connect GitHub account" });
     expect(connect).toBeDisabled();
-    expect(screen.getByText(/Settings → GitHub before connecting/)).toBeVisible();
+    expect(
+      screen.getByText(/Add your GitHub App Client ID and Client Secret in Settings/),
+    ).toBeVisible();
   });
 
   it("shows the authorizing state with a working cancel action", async () => {

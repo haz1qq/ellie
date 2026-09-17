@@ -12,6 +12,7 @@ const GITHUB_ERROR_CATEGORIES: readonly GitHubErrorCategory[] = [
   "busy",
   "authorization_state_mismatch",
   "authorization_denied",
+  "app_credentials_invalid",
   "authentication_required",
   "authentication_expired",
   "rate_limited",
@@ -79,6 +80,7 @@ export interface GitHubConnectionApi {
   signInPending: boolean;
   refresh: () => Promise<boolean>;
   saveClientId: (clientId: string) => Promise<boolean>;
+  saveClientSecret: (clientSecret: string) => Promise<boolean>;
   signIn: () => Promise<boolean>;
   cancelSignIn: () => Promise<boolean>;
   disconnect: () => Promise<boolean>;
@@ -154,6 +156,8 @@ export function useGitHubConnection(native: boolean): GitHubConnectionApi {
     refresh: () => run(() => desktop.githubConnectionStatus()),
     saveClientId: (clientId: string) =>
       run(() => desktop.githubSaveClientId(clientId)),
+    saveClientSecret: (clientSecret: string) =>
+      run(() => desktop.githubSaveClientSecret(clientSecret)),
     signIn: () => run(() => desktop.githubSignIn(), setSignInPending),
     cancelSignIn: () => run(() => desktop.githubCancelSignIn()),
     disconnect: () => run(() => desktop.githubDisconnect()),

@@ -181,6 +181,7 @@ export type GitHubErrorCategory =
   | "busy"
   | "authorization_state_mismatch"
   | "authorization_denied"
+  | "app_credentials_invalid"
   | "authentication_required"
   | "authentication_expired"
   | "rate_limited"
@@ -198,6 +199,7 @@ export interface GitHubConnectionStatus {
   lastError: GitHubErrorCategory | null;
   tokenPresent: boolean;
   clientIdConfigured: boolean;
+  clientSecretConfigured: boolean;
 }
 export interface GitHubRepositorySummary {
   id: number;
@@ -249,6 +251,10 @@ export const desktop = {
     invoke<GitHubConnectionStatus>("github_connection_status"),
   githubSaveClientId: (clientId: string) =>
     invoke<GitHubConnectionStatus>("github_save_client_id", { clientId }),
+  githubSaveClientSecret: (clientSecret: string) =>
+    invoke<GitHubConnectionStatus>("github_save_client_secret", {
+      clientSecret,
+    }),
   githubSignIn: () => invoke<GitHubConnectionStatus>("github_sign_in"),
   githubCancelSignIn: () =>
     invoke<GitHubConnectionStatus>("github_cancel_sign_in"),

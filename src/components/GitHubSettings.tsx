@@ -9,6 +9,7 @@ export function GitHubSettings({ native }: { native: boolean }) {
   const connection = useGitHubConnection(native);
   const { status, error: connectionError, busy, signInPending } = connection;
   const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -19,11 +20,21 @@ export function GitHubSettings({ native }: { native: boolean }) {
   const statusError = status?.lastError ? githubErrorCopyOf(status.lastError) : "";
   const alertText = connectionError || statusError;
   const trimmedClientId = clientId.trim();
+  const trimmedClientSecret = clientSecret.trim();
 
   async function handleSaveClientId() {
     if (trimmedClientId === "" || busy) return;
     const saved = await connection.saveClientId(trimmedClientId);
     if (saved) setSavedMessage("GitHub App Client ID saved on this device.");
+  }
+
+  async function handleSaveClientSecret() {
+    if (trimmedClientSecret === "" || busy) return;
+    const saved = await connection.saveClientSecret(trimmedClientSecret);
+    if (saved) {
+      setClientSecret("");
+      setSavedMessage("GitHub App Client Secret saved securely.");
+    }
   }
 
   async function handleCancelSignIn() {
@@ -71,6 +82,30 @@ export function GitHubSettings({ native }: { native: boolean }) {
         </button>
       </div>
 
+      <div className="github-client-id-row">
+        <label htmlFor="github-client-secret">GitHub App Client Secret</label>
+        <input
+          id="github-client-secret"
+          type="password"
+          value={clientSecret}
+          placeholder="Enter the generated secret"
+          autoComplete="off"
+          spellCheck={false}
+          disabled={busy}
+          onChange={(event) => {
+            setClientSecret(event.target.value);
+            setSavedMessage("");
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => void handleSaveClientSecret()}
+          disabled={busy || trimmedClientSecret === ""}
+        >
+          Save Client Secret
+        </button>
+      </div>
+
       <p role="status">
         {!native
           ? "Open the desktop app to connect GitHub."
@@ -90,11 +125,18 @@ export function GitHubSettings({ native }: { native: boolean }) {
         </p>
       )}
       {status && (
-        <p>
-          {status.clientIdConfigured
-            ? "GitHub App Client ID is set."
-            : "No GitHub App Client ID saved yet — add yours above."}
-        </p>
+        <>
+          <p>
+            {status.clientIdConfigured
+              ? "GitHub App Client ID is set."
+              : "No GitHub App Client ID saved yet — add yours above."}
+          </p>
+          <p>
+            {status.clientSecretConfigured
+              ? "GitHub App Client Secret is stored securely."
+              : "No GitHub App Client Secret saved yet — generate one in GitHub and add it above."}
+          </p>
+        </>
       )}
       {savedMessage && <p role="status">{savedMessage}</p>}
       {alertText && <p role="alert">{alertText}</p>}
@@ -104,7 +146,12 @@ export function GitHubSettings({ native }: { native: boolean }) {
           type="button"
           onClick={() => void connection.signIn()}
           disabled={
-            busy || connected || waiting || !status || !status.clientIdConfigured
+            busy ||
+            connected ||
+            waiting ||
+            !status ||
+            !status.clientIdConfigured ||
+            !status.clientSecretConfigured
           }
         >
           Connect GitHub
@@ -130,16 +177,16 @@ export function GitHubSettings({ native }: { native: boolean }) {
       </div>
 
       <p className="github-privacy-note">
-        The refresh token is stored in Windows Credential Manager and is never
-        displayed. Disconnect removes it. You can also revoke the app in your
-        GitHub account settings. Repositories and commits are fetched on demand
-        and are not stored by Ellie.
+        The App Client Secret and refresh token are stored in Windows Credential
+        Manager and are never displayed or returned to the interface. Disconnect
+        removes both. You can also revoke the app in your GitHub account settings.
+        Repositories and commits are fetched on demand and are not stored by Ellie.
       </p>
 
       <ConfirmDialog
         open={disconnectOpen}
         title="Disconnect GitHub?"
-        body="This removes the connected account and the saved refresh token from this device. Local AI usage data is unaffected, and you can reconnect at any time."
+        body="This removes the connected account, App Client Secret, and refresh token from this device. The Client ID and local AI usage data remain, and you can reconnect after saving the secret again."
         confirmLabel="Disconnect"
         cancelLabel="Keep connected"
         busy={busy}

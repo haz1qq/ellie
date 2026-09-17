@@ -21,7 +21,7 @@ Before implementation, verify against official GitHub documentation:
 - Token expiry, refresh, revocation, storage and recovery behavior.
 - Supported API versions/media types, pagination/filtering, rate-limit guidance and creation responses.
 
-Do not embed a client secret, silently reuse CLI/browser credentials, or choose broad classic-token permissions for convenience. An officially supported, owner-approved flow is required. Credential Manager stores any access/refresh secrets under dedicated identities; React receives only status and necessary non-secret authorization UI data. No stored credential crosses IPC, events, API, config, logs, or SQLite.
+Do not embed a client secret, silently reuse CLI/browser credentials, or choose broad classic-token permissions for convenience. An officially supported, owner-approved flow is required. The runtime-supplied GitHub App Client Secret and refresh token use separate Credential Manager identities; React receives only configured/not-configured status after the one-way main-window save command. No stored credential is returned through IPC, events, API, config, logs, or SQLite.
 
 The W1 feasibility gate is recorded in [`workspace-github-auth.md`](workspace-github-auth.md): the owner approved **GitHub App with PKCE web flow and a `127.0.0.1` loopback redirect**, with verified official facts covering device flow vs PKCE, token lifetimes, permissions, and rate limits. The W2 registration checklist, exact permission request, and consent copy are in [`workspace-github-app-registration.md`](workspace-github-app-registration.md); its live-verification items belong to W2 before any implementation.
 
@@ -160,9 +160,19 @@ A scan confirmed the owner's real Client ID appears nowhere in the repository; o
 
 ## W5a implementation status (verified on branch `feat/workspace-github`)
 
-Implemented and parent-verified: Rust-owned `github_sign_in` / `github_cancel_sign_in` orchestration. The command binds an ephemeral `127.0.0.1` listener, starts the PKCE authorization, opens the authorize URL in the default browser through `tauri-plugin-opener` with a **URL-scoped capability** (only `https://github.com/login/oauth/authorize?*` from the main window), awaits exactly one loopback GET, rejects any non-callback path and any non-loophost peer, parses only `code` + `state`, completes the connection, and serves a minimal `no-store` page to the browser. Cancellation is generation-aware and preserves the refresh token; timeout matches the 15-minute authorization lifetime. The callback code/state never cross IPC. New dependency: `tauri-plugin-opener` v2 (official).
+Implemented and parent-verified: Rust-owned `github_sign_in` / `github_cancel_sign_in` orchestration. The command binds an ephemeral `127.0.0.1` listener, starts the PKCE authorization, opens the authorize URL in the default browser through `tauri-plugin-opener` with a **URL-scoped capability** (only `https://github.com/login/oauth/authorize?*` from the main window), awaits exactly one loopback GET, rejects any non-callback path and any non-loophost peer, parses exactly one `code` + `state` and an optional validated GitHub RFC 9207 `iss`, completes the connection, and serves a minimal `no-store` page to the browser. Cancellation is generation-aware and preserves the refresh token; timeout matches the 15-minute authorization lifetime. The callback code/state never cross IPC. New dependency: `tauri-plugin-opener` v2 (official).
 
 Checks actually run by the parent and their results: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` (122 library + 32 CLI, 0 failed), `npm run typecheck`, `npm run lint`, `npm test` (5 files, 74 tests), `npm run build` — all passed. A scan confirmed no owner client id or secret appears in the repository. Live authorization and real default-browser opening remain unverified until the W5b UI exists.
+
+## Live-auth correction: required GitHub App Client Secret
+
+The first live callback reached Ellie, but GitHub rejected the token exchange. Official documentation review confirmed the implementation's earlier assumption was wrong: for a GitHub App web flow, `client_secret` remains required at both authorization-code exchange and refresh even with PKCE. The owner chose to keep the loopback + PKCE flow and store the App secret securely.
+
+Implemented: dedicated `github_app_client_secret` Credential Manager entry; main-window-only `github_save_client_secret`; `clientSecretConfigured` boolean status (never the value); missing-secret preflight before opening the browser; Client Secret included in both code exchange and refresh forms; redacted `app_credentials_invalid` error category; disconnect and Client-ID replacement delete the App secret and refresh token; masked Settings input that clears after save; Connect disabled until both Client ID and Secret are configured. The secret is never stored in SQLite/config, returned through IPC, logged, or committed. Tests use sanitized values only.
+
+Parent verification passed: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (123 library + 32 CLI tests); `npm run typecheck`; `npm run lint`; `npm test` (7 files, 103 tests); and `npm run build`.
+
+Live sign-in must be retried after the owner generates and saves an App Client Secret in Settings. Repository/commit loading, restart restore, refresh-token rotation, and disconnect remain live-verification items until that retry succeeds.
 
 ## Acceptance and remaining decisions
 

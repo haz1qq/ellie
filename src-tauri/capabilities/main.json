@@ -23,6 +23,7 @@
     "allow-provider-key-status",
     "allow-github-connection-status",
     "allow-github-save-client-id",
+    "allow-github-save-client-secret",
     "allow-github-sign-in",
     "allow-github-cancel-sign-in",
     "allow-github-connect-start",

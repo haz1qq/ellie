@@ -8,6 +8,7 @@ vi.mock("../lib/desktop", () => ({
   desktop: {
     githubConnectionStatus: vi.fn(),
     githubSaveClientId: vi.fn(),
+    githubSaveClientSecret: vi.fn(),
     githubSignIn: vi.fn(),
     githubCancelSignIn: vi.fn(),
     githubDisconnect: vi.fn(),
@@ -22,10 +23,15 @@ const disconnected: GitHubConnectionStatus = {
   lastError: null,
   tokenPresent: false,
   clientIdConfigured: false,
+  clientSecretConfigured: false,
 };
-const configured: GitHubConnectionStatus = {
+const idConfigured: GitHubConnectionStatus = {
   ...disconnected,
   clientIdConfigured: true,
+};
+const configured: GitHubConnectionStatus = {
+  ...idConfigured,
+  clientSecretConfigured: true,
 };
 const authorizing: GitHubConnectionStatus = {
   ...configured,
@@ -37,6 +43,7 @@ const connected: GitHubConnectionStatus = {
   lastError: null,
   tokenPresent: true,
   clientIdConfigured: true,
+  clientSecretConfigured: true,
 };
 
 function deferred<T>() {
@@ -52,7 +59,8 @@ function deferred<T>() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(disconnected);
-  vi.mocked(desktop.githubSaveClientId).mockResolvedValue(configured);
+  vi.mocked(desktop.githubSaveClientId).mockResolvedValue(idConfigured);
+  vi.mocked(desktop.githubSaveClientSecret).mockResolvedValue(configured);
   vi.mocked(desktop.githubCancelSignIn).mockResolvedValue(disconnected);
   vi.mocked(desktop.githubDisconnect).mockResolvedValue(disconnected);
 });
@@ -74,11 +82,35 @@ describe("GitHub Settings section", () => {
     expect(screen.getByText("GitHub App Client ID is set.")).toBeVisible();
   });
 
-  it("explains the disconnect status and gates Connect on a configured Client ID", async () => {
+  it("saves the trimmed Client Secret, clears the input, and never displays it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(idConfigured);
+    render(<GitHubSettings native />);
+    await screen.findByText("Not connected to GitHub.");
+    const secretInput = screen.getByLabelText("GitHub App Client Secret");
+    await user.type(secretInput, "  sanitized-test-client-secret  ");
+    await user.click(screen.getByRole("button", { name: "Save Client Secret" }));
+    expect(desktop.githubSaveClientSecret).toHaveBeenCalledWith(
+      "sanitized-test-client-secret",
+    );
+    expect(
+      await screen.findByText("GitHub App Client Secret saved securely."),
+    ).toBeVisible();
+    expect(secretInput).toHaveValue("");
+    expect(screen.queryByText("sanitized-test-client-secret")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("GitHub App Client Secret is stored securely."),
+    ).toBeVisible();
+  });
+
+  it("explains the disconnect status and gates Connect on both App credentials", async () => {
     render(<GitHubSettings native />);
     await screen.findByText("Not connected to GitHub.");
     expect(
       screen.getByText(/No GitHub App Client ID saved yet — add yours above/),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/No GitHub App Client Secret saved yet/),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save Client ID" })).toBeDisabled();
@@ -192,7 +224,7 @@ describe("GitHub Settings section", () => {
     expect(
       screen.getByText("Open the desktop app to connect GitHub."),
     ).toBeVisible();
-    for (const name of ["Connect GitHub", "Save Client ID"]) {
+    for (const name of ["Connect GitHub", "Save Client ID", "Save Client Secret"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
   });

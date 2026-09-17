@@ -311,6 +311,16 @@ pub async fn github_save_client_id(
 }
 
 #[tauri::command]
+pub async fn github_save_client_secret(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    client_secret: String,
+) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.save_client_secret(client_secret).await
+}
+
+#[tauri::command]
 pub async fn github_sign_in(
     window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
@@ -414,6 +424,7 @@ mod local_api_ipc_tests {
         for command in [
             "github_connection_status",
             "github_save_client_id",
+            "github_save_client_secret",
             "github_sign_in",
             "github_cancel_sign_in",
             "github_connect_start",

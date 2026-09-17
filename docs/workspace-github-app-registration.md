@@ -1,6 +1,6 @@
 # GitHub App registration and PKCE flow — W2 preparation
 
-**Status: documentation only.** Follows the approved W1 decision (owner-selected **option A**: GitHub App + web application flow with PKCE and a `127.0.0.1` loopback redirect; see [W1 record](workspace-github-auth.md)). This document is the registration checklist, the exact permission request, the consent copy, and the PKCE implementation notes that W2 must verify before any code. **Nothing here has been executed; the GitHub App does not exist yet.**
+**Status: app registered and integration implemented; setup corrected after live verification.** Follows the approved W1 decision (owner-selected **option A**: GitHub App + web application flow with PKCE and a `127.0.0.1` loopback redirect; see [W1 record](workspace-github-auth.md)). GitHub's current documentation requires the GitHub App `client_secret` at code exchange and refresh even with PKCE. The owner approved runtime entry with Windows Credential Manager storage; the secret is never committed or embedded.
 
 ## 1. Who does what
 
@@ -9,11 +9,11 @@
 | Register the GitHub App under your account | Yes — at `github.com/settings/apps/new` | — |
 | Enter app metadata, callback URL, permissions | Yes (using values below) | — |
 | Enable user-token expiration | Yes (one toggle) | — |
-| Provide the App Client ID (non-secret) | Yes — to Settings | Read non-secret client ID; never a client secret (none exists for PKCE) |
-| Sign in, exchange code, store refresh token | Authorize in browser | Rust code-verifier → exchange → Credential Manager |
+| Provide the App Client ID (non-secret) and generated Client Secret | Yes — to Settings | Persist the Client ID as non-secret configuration; store the Client Secret only in Windows Credential Manager and expose only configured/not-configured status |
+| Sign in, exchange code, store refresh token | Authorize in browser | Rust code-verifier + Credential Manager App secret → exchange; refresh token → separate Credential Manager identity |
 | Read repositories/commits, create repositories | Confirm in Ellie | `GET /user/repos`, `GET /repos/{o}/{r}/commits`, `POST /user/repos` |
 
-No secret value is embedded in the binary: PKCE uses a runtime `code_verifier`; the client secret is never required for the web flow with PKCE on a public client per the W1 record.
+No secret value is embedded in the binary. PKCE uses a runtime `code_verifier`, while GitHub still requires the registered GitHub App Client Secret. The owner enters that generated secret at runtime; Rust stores it in Windows Credential Manager, never SQLite, source, configuration, logs, events, or returned IPC data.
 
 ## 2. App-registration checklist (owner, in GitHub)
 
@@ -37,7 +37,7 @@ Fill in on the GitHub App **settings → General** page for the new app:
 9. **Account permissions**: leave default (none additional). `GET /user/repos` relies on the app's repository grant; **confirm at registration** whether listing own repositories appears under a repository permission label.
 10. **Repository access**: choose **All repositories** on the authorizing account during installation, so every repository the owner later selects for tracking is readable and newly created repositories remain visible. Ellie stores only the tracked subset locally; selection is presentation data, not an API grant.
 11. **Where the app can be installed**: your personal account only (this slice is personal-account repositories; organization creation remains deferred).
-12. After creation, copy the **Client ID** (public, non-secret) into Ellie Settings → GitHub. Treat it as public metadata; never treat it as a credential, and never ask for a client secret.
+12. After creation, copy the **Client ID** (public, non-secret) into Ellie Settings → GitHub. Then generate a **Client Secret** on the App's General page, copy it into Ellie's masked Client Secret field, save it once, and remove it from any clipboard manager if possible. Treat the Client Secret as a credential: never commit it, paste it into logs/chat/screenshots, or store it in plaintext. Ellie stores it only in Windows Credential Manager and never displays it again.
 
 ## 3. PKCE flow implementation notes (for the later Rust implementation)
 
@@ -48,9 +48,9 @@ These are design notes, not code:
   - `code_challenge` = base64url(SHA-256(verifier)); `code_challenge_method=S256` (only S256 is supported — W1 verified).
   - `state` = unguessable random; validated on redirect to prevent CSRF.
   - `prompt=select_account` optional to force the account picker.
-- **Token exchange** (`POST https://github.com/login/oauth/access_token`): send `client_id`, `code`, `redirect_uri`, `code_verifier`, `grant_type=authorization_code`. Accept `application/json`. No client secret with PKCE.
+- **Token exchange** (`POST https://github.com/login/oauth/access_token`): send `client_id`, required `client_secret`, `code`, `redirect_uri`, `code_verifier`, and `grant_type=authorization_code`. Accept `application/json`. GitHub requires the App secret even with PKCE; PKCE protects the authorization code but does not replace App authentication.
 - **Session flow**: Rust opens the system browser; Rust owns the ephemeral loopback listener (random high port per attempt); parse `code` + `state` from the loopback GET; close the listener immediately; validate `state`; exchange; never let the WebView see the code or token.
-- **Credential storage**: store only the **refresh token** in Windows Credential Manager under a dedicated Ellie GitHub identity. Keep the 8-hour user access token in memory; regenerate via `grant_type=refresh_token` (W1: `refresh_token_expires_in` 6 months). Store whatever token the refresh response returns (rotation behavior to be confirmed live — W1 section 7 item 3).
+- **Credential storage**: store the **App Client Secret** and **refresh token** under separate dedicated Ellie identities in Windows Credential Manager. Keep the 8-hour user access token in memory. Refresh with `client_id`, `client_secret`, `grant_type=refresh_token`, and the refresh token (W1: `refresh_token_expires_in` 6 months); persist any rotated refresh token. Disconnect deletes both stored secrets while preserving the non-secret Client ID.
 - **Failure signals**: `bad_refresh_token` → prompt reconnect; 401 on API → mark sync paused and attempt one refresh; `access_denied`/`token expired` → clear session state and show re-authorize.
 - **Consent-time boundary**: only after a successful exchange that returns a non-`gho_` (user access token, `ghu_`) token may Ellie persist the connection record and begin reads.
 
@@ -71,7 +71,7 @@ No repository deletion, code editing, branch/PR/issue operations, members, secre
 > - **Read** your repositories and their commit history, for repositories you choose to track.
 > - **Create** new repositories when you use the New repository action. New repositories default to private.
 > Ellie never edits, deletes, or changes your repositories, and never touches issues, pull requests, or members.
-> The sign-in uses GitHub's secure device-safe OAuth flow with PKCE. Only a refresh token is saved to Windows Credential Manager on this PC; it can be revoked from GitHub at any time, after which Ellie stops sync and asks you to reconnect.
+> The sign-in uses GitHub's OAuth flow with PKCE. GitHub requires your App Client Secret for token exchange; Ellie stores it and the refresh token in separate Windows Credential Manager entries on this PC, never displays them, and removes both on disconnect. You can revoke the app or rotate/delete the App secret in GitHub at any time, after which Ellie stops sync and asks you to reconnect.
 > [Connect to GitHub]  [Learn what Ellie stores locally]
 
 ### Browser authorization screen explanation (shown before opening the browser)
@@ -84,7 +84,7 @@ No repository deletion, code editing, branch/PR/issue operations, members, secre
 
 ## 5. Privacy/storage expectations
 
-- Stored locally: non-secret connection record (account ID/login, status, timestamps), tracked-repository selection, GitHub cache (commits, coverage), task repository links. The **refresh token** is in Windows Credential Manager, never SQLite/IPC/events/logs.
+- Stored locally: non-secret connection record (Client ID, account ID/login, status, timestamps), tracked-repository selection, GitHub cache (commits, coverage), task repository links. The **App Client Secret** and **refresh token** use separate Windows Credential Manager entries, never SQLite/config/events/logs; IPC accepts the secret only on the main-window save command and returns only configured status.
 - The 90-day GitHub cache and task links do not leave this PC; no Ellie cloud.
 - Same-user malware limitation from `docs/security.md` applies; no capture-exclusion or encryption promises.
 

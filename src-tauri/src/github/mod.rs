@@ -32,6 +32,7 @@ pub use models::{CommitSummary, GitHubAccount, RepositorySummary};
 pub const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
 pub const DEFAULT_AUTH_BASE_URL: &str = "https://github.com";
 pub const REFRESH_TOKEN_ACCOUNT: &str = "github_refresh_token";
+pub const CLIENT_SECRET_ACCOUNT: &str = "github_app_client_secret";
 
 const API_VERSION: &str = "2022-11-28";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -55,6 +56,7 @@ pub enum GitHubErrorCategory {
     Busy,
     AuthorizationStateMismatch,
     AuthorizationDenied,
+    AppCredentialsInvalid,
     AuthenticationRequired,
     AuthenticationExpired,
     RateLimited,
@@ -97,6 +99,10 @@ impl GitHubError {
 
     const fn state_mismatch() -> Self {
         Self::new(GitHubErrorCategory::AuthorizationStateMismatch)
+    }
+
+    pub(crate) const fn app_credentials_invalid() -> Self {
+        Self::new(GitHubErrorCategory::AppCredentialsInvalid)
     }
 
     const fn authentication_required() -> Self {
@@ -154,6 +160,9 @@ impl fmt::Display for GitHubError {
                 "the GitHub authorization response did not match the request"
             }
             GitHubErrorCategory::AuthorizationDenied => "GitHub authorization was denied",
+            GitHubErrorCategory::AppCredentialsInvalid => {
+                "the GitHub App client credentials were rejected"
+            }
             GitHubErrorCategory::AuthenticationRequired => "GitHub authentication is required",
             GitHubErrorCategory::AuthenticationExpired => "GitHub authentication has expired",
             GitHubErrorCategory::RateLimited => "GitHub rate limited the request",
@@ -189,6 +198,7 @@ pub struct GitHubConnectionStatus {
     pub last_error: Option<GitHubErrorCategory>,
     pub token_present: bool,
     pub client_id_configured: bool,
+    pub client_secret_configured: bool,
 }
 
 #[derive(Default)]
@@ -295,6 +305,7 @@ impl GitHubService {
     pub async fn connection_status(&self) -> Result<GitHubConnectionStatus, GitHubError> {
         self.restore_if_needed().await?;
         let token_present = self.read_refresh_token().await?.is_some();
+        let client_secret_configured = self.read_client_secret().await?.is_some();
         let client_id_configured = self.load_connection().await?.is_some();
         let connection = self
             .connection
@@ -306,6 +317,7 @@ impl GitHubService {
             last_error: connection.last_error,
             token_present,
             client_id_configured,
+            client_secret_configured,
         })
     }
 
@@ -334,7 +346,8 @@ impl GitHubService {
         }
 
         let generation = self.generation.load(Ordering::SeqCst);
-        if self.read_refresh_token().await?.is_none() {
+        if self.read_refresh_token().await?.is_none() || self.read_client_secret().await?.is_none()
+        {
             return Ok(());
         }
         let Some(stored) = self.load_connection().await? else {
@@ -414,6 +427,7 @@ impl GitHubService {
             .as_ref()
             .map(|session| session.client_id.clone());
         let token_present = self.read_refresh_token().await?.is_some();
+        let client_secret_configured = self.read_client_secret().await?.is_some();
         let connection_account = self
             .connection
             .lock()
@@ -426,6 +440,7 @@ impl GitHubService {
             .is_some()
             || active_client_id.is_some()
             || token_present
+            || client_secret_configured
             || self.state() == GitHubConnectionState::Connected;
         let mismatched = stored
             .as_ref()
@@ -462,12 +477,26 @@ impl GitHubService {
                 };
             }
             let token_result = self.delete_refresh_token().await;
+            let secret_result = self.delete_client_secret().await;
             let account_result = self.clear_stored_account().await;
             token_result?;
+            secret_result?;
             account_result?;
         } else if let Ok(mut connection) = self.connection.lock() {
             connection.client_id = Some(client_id);
             connection.account = account;
+            connection.last_error = None;
+        }
+        self.connection_status().await
+    }
+
+    pub async fn save_client_secret(
+        &self,
+        client_secret: String,
+    ) -> Result<GitHubConnectionStatus, GitHubError> {
+        auth::validate_client_secret(&client_secret)?;
+        self.store_client_secret(client_secret).await?;
+        if let Ok(mut connection) = self.connection.lock() {
             connection.last_error = None;
         }
         self.connection_status().await
@@ -485,6 +514,11 @@ impl GitHubService {
                 return Err(error);
             }
         };
+        if self.read_client_secret().await?.is_none() {
+            let error = GitHubError::authentication_required();
+            self.record_error(error.category());
+            return Err(error);
+        }
         let listener = bind_loopback_listener().await?;
         let port = listener
             .local_addr()
@@ -570,12 +604,14 @@ impl GitHubService {
             };
         }
         let token_present = self.read_refresh_token().await?.is_some();
+        let client_secret_configured = self.read_client_secret().await?.is_some();
         Ok(GitHubConnectionStatus {
             state: GitHubConnectionState::Disconnected,
             account: None,
             last_error: Some(GitHubErrorCategory::Cancelled),
             token_present,
             client_id_configured: stored.is_some(),
+            client_secret_configured,
         })
     }
 
@@ -686,10 +722,15 @@ impl GitHubService {
         pending: PendingAuthorization,
     ) -> Result<(), GitHubError> {
         self.ensure_generation(pending.generation)?;
+        let client_secret = self
+            .read_client_secret()
+            .await?
+            .ok_or_else(GitHubError::authentication_required)?;
         let tokens = auth::exchange_code(
             &self.client,
             &self.auth_base_url,
             &pending.client_id,
+            &client_secret,
             &code,
             &pending.redirect_uri,
             &pending.verifier,
@@ -760,8 +801,9 @@ impl GitHubService {
         }
 
         let token_result = self.delete_refresh_token().await;
+        let secret_result = self.delete_client_secret().await;
         let account_result = self.clear_stored_account().await;
-        if let Err(error) = token_result.and(account_result) {
+        if let Err(error) = token_result.and(secret_result).and(account_result) {
             self.record_error(error.category());
             return Err(error);
         }
@@ -934,10 +976,15 @@ impl GitHubService {
             .read_refresh_token()
             .await?
             .ok_or_else(GitHubError::authentication_required)?;
+        let client_secret = self
+            .read_client_secret()
+            .await?
+            .ok_or_else(GitHubError::authentication_required)?;
         let tokens = auth::refresh_token(
             &self.client,
             &self.auth_base_url,
             &session.client_id,
+            &client_secret,
             &refresh_token,
         )
         .await?;
@@ -1190,6 +1237,35 @@ impl GitHubService {
         .map_err(|_| GitHubError::credential_store())?
         .map_err(|_| GitHubError::credential_store())
     }
+
+    async fn read_client_secret(&self) -> Result<Option<String>, GitHubError> {
+        let store = Arc::clone(&self.secret_store);
+        tokio::task::spawn_blocking(move || store.get(CLIENT_SECRET_ACCOUNT))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+            .map_err(|_| GitHubError::credential_store())
+    }
+
+    async fn store_client_secret(&self, client_secret: String) -> Result<(), GitHubError> {
+        let store = Arc::clone(&self.secret_store);
+        tokio::task::spawn_blocking(move || store.set(CLIENT_SECRET_ACCOUNT, &client_secret))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+            .map_err(|_| GitHubError::credential_store())
+    }
+
+    async fn delete_client_secret(&self) -> Result<(), GitHubError> {
+        let store = Arc::clone(&self.secret_store);
+        tokio::task::spawn_blocking(move || {
+            if store.get(CLIENT_SECRET_ACCOUNT)?.is_some() {
+                store.delete(CLIENT_SECRET_ACCOUNT)?;
+            }
+            Ok::<(), crate::error::AppError>(())
+        })
+        .await
+        .map_err(|_| GitHubError::credential_store())?
+        .map_err(|_| GitHubError::credential_store())
+    }
 }
 
 async fn bind_loopback_listener() -> Result<tokio::net::TcpListener, GitHubError> {
@@ -1326,6 +1402,8 @@ mod tests {
         task::JoinHandle,
     };
 
+    const TEST_CLIENT_SECRET: &str = "sanitized-test-client-secret";
+
     struct MockResponse {
         status: &'static str,
         headers: &'static str,
@@ -1441,6 +1519,15 @@ mod tests {
         connection_store: Arc<dyn GitHubConnectionStore>,
         limits: ServiceLimits,
     ) -> GitHubService {
+        if store
+            .get(CLIENT_SECRET_ACCOUNT)
+            .expect("read test client secret")
+            .is_none()
+        {
+            store
+                .set(CLIENT_SECRET_ACCOUNT, TEST_CLIENT_SECRET)
+                .expect("store test client secret");
+        }
         let mut service = GitHubService::with_auth_base(
             test_client(),
             base_url,
@@ -1539,7 +1626,7 @@ mod tests {
         let requests = requests.lock().expect("requests");
         assert!(requests[0].contains("code=sanitized-code"));
         assert!(requests[0].contains("code_verifier="));
-        assert!(!requests[0].contains("client_secret"));
+        assert!(requests[0].contains("client_secret=sanitized-test-client-secret"));
     }
 
     #[tokio::test]
@@ -1651,6 +1738,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn orchestrated_sign_in_requires_a_configured_client_secret() {
+        let secrets = Arc::new(MemoryStore::default());
+        let service = test_service(
+            "http://127.0.0.1:9",
+            secrets.clone(),
+            ServiceLimits::default(),
+        );
+        service
+            .save_client_id("Iv1.sanitized-client".to_string())
+            .await
+            .expect("configure client ID");
+        secrets
+            .delete(CLIENT_SECRET_ACCOUNT)
+            .expect("remove test client secret");
+        let opened = Arc::new(AtomicBool::new(false));
+        let opened_in_callback = Arc::clone(&opened);
+        let error = service
+            .sign_in(move |_| {
+                opened_in_callback.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .await
+            .expect_err("missing client secret");
+        assert_eq!(
+            error.category(),
+            GitHubErrorCategory::AuthenticationRequired
+        );
+        assert!(!opened.load(Ordering::SeqCst));
+        let status = service.connection_status().await.expect("status");
+        assert!(status.client_id_configured);
+        assert!(!status.client_secret_configured);
+        assert_eq!(service.state(), GitHubConnectionState::Disconnected);
+    }
+
+    #[tokio::test]
     async fn orchestrated_sign_in_rejects_the_wrong_callback_path() {
         let service = test_service(
             "http://127.0.0.1:9",
@@ -1749,7 +1871,7 @@ mod tests {
         let requests = requests.lock().expect("requests");
         assert!(requests[0].starts_with("POST /login/oauth/access_token"));
         assert!(requests[0].contains("grant_type=authorization_code"));
-        assert!(!requests[0].contains("client_secret"));
+        assert!(requests[0].contains("client_secret=sanitized-test-client-secret"));
         assert!(requests[1].starts_with("GET /user"));
         assert!(requests[1]
             .to_ascii_lowercase()
@@ -1857,6 +1979,7 @@ mod tests {
         assert!(requests[0].starts_with("POST /login/oauth/access_token"));
         assert!(requests[0].contains("grant_type=refresh_token"));
         assert!(requests[0].contains("refresh_token=ghr_sanitized_refresh_value"));
+        assert!(requests[0].contains("client_secret=sanitized-test-client-secret"));
         assert!(requests[1]
             .to_ascii_lowercase()
             .contains("authorization: bearer ghu_rotated_access_value"));
@@ -2037,10 +2160,12 @@ mod tests {
             .expect("save replacement client id");
         assert_eq!(status.state, GitHubConnectionState::Disconnected);
         assert!(status.client_id_configured);
+        assert!(!status.client_secret_configured);
         assert!(!status.token_present);
         assert_eq!(status.account, None);
         assert!(service.access_session.lock().await.is_none());
         assert_eq!(secrets.get(REFRESH_TOKEN_ACCOUNT).expect("token"), None);
+        assert_eq!(secrets.get(CLIENT_SECRET_ACCOUNT).expect("secret"), None);
         let stored = connections
             .load()
             .expect("connection")
@@ -2290,7 +2415,9 @@ mod tests {
         assert_eq!(status.account, None);
         assert!(!status.token_present);
         assert!(status.client_id_configured);
+        assert!(!status.client_secret_configured);
         assert_eq!(store.get(REFRESH_TOKEN_ACCOUNT).expect("deleted"), None);
+        assert_eq!(store.get(CLIENT_SECRET_ACCOUNT).expect("deleted"), None);
         assert!(service.access_session.lock().await.is_none());
         let persisted = connections
             .load()

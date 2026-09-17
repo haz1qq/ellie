@@ -86,11 +86,13 @@ pub(crate) async fn exchange_code(
     client: &Client,
     auth_base_url: &str,
     client_id: &str,
+    client_secret: &str,
     code: &str,
     redirect_uri: &str,
     verifier: &str,
 ) -> Result<TokenSet, GitHubError> {
     validate_client_id(client_id)?;
+    validate_client_secret(client_secret)?;
     validate_authorization_value(code, 1, 512)?;
     validate_authorization_value(verifier, 43, 128)?;
     post_token(
@@ -98,6 +100,7 @@ pub(crate) async fn exchange_code(
         auth_base_url,
         &[
             ("client_id", client_id),
+            ("client_secret", client_secret),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("code_verifier", verifier),
@@ -111,15 +114,18 @@ pub(crate) async fn refresh_token(
     client: &Client,
     auth_base_url: &str,
     client_id: &str,
+    client_secret: &str,
     refresh_token: &str,
 ) -> Result<TokenSet, GitHubError> {
     validate_client_id(client_id)?;
+    validate_client_secret(client_secret)?;
     validate_authorization_value(refresh_token, 1, 512)?;
     post_token(
         client,
         auth_base_url,
         &[
             ("client_id", client_id),
+            ("client_secret", client_secret),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
         ],
@@ -194,7 +200,7 @@ pub(crate) fn parse_token_response(
     }
     if !status.is_success() {
         return Err(match status.as_u16() {
-            401 => GitHubError::authentication_expired(),
+            401 => GitHubError::app_credentials_invalid(),
             403 => GitHubError::permission_denied(),
             429 => GitHubError::rate_limited(),
             500..=599 => GitHubError::provider_unavailable(),
@@ -226,6 +232,7 @@ fn map_oauth_error(error: &str) -> GitHubError {
             GitHubError::authentication_expired()
         }
         "access_denied" => GitHubError::authorization_denied(),
+        "incorrect_client_credentials" => GitHubError::app_credentials_invalid(),
         "slow_down" => GitHubError::rate_limited(),
         _ => GitHubError::authorization_denied(),
     }
@@ -241,6 +248,10 @@ pub(crate) fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
         return Err(GitHubError::invalid_input());
     }
     Ok(())
+}
+
+pub(crate) fn validate_client_secret(client_secret: &str) -> Result<(), GitHubError> {
+    validate_authorization_value(client_secret, 1, 512)
 }
 
 fn validate_authorization_value(
@@ -382,6 +393,18 @@ mod tests {
         .expect("error response");
         assert_eq!(error.category(), GitHubErrorCategory::AuthenticationExpired);
         assert!(!error.to_string().contains("sensitive"));
+
+        let invalid_credentials = parse_token_response(
+            StatusCode::UNAUTHORIZED,
+            br#"{"error":"incorrect_client_credentials","error_description":"sensitive provider copy"}"#,
+        )
+        .err()
+        .expect("invalid client credentials");
+        assert_eq!(
+            invalid_credentials.category(),
+            GitHubErrorCategory::AppCredentialsInvalid
+        );
+        assert!(!invalid_credentials.to_string().contains("sensitive"));
 
         let wrong_expiry = SUCCESS.replace("28800", "3600");
         assert_eq!(

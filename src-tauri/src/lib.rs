@@ -128,6 +128,7 @@ pub fn run() -> Result<(), AppError> {
             commands::provider_key_status,
             commands::github_connection_status,
             commands::github_save_client_id,
+            commands::github_save_client_secret,
             commands::github_sign_in,
             commands::github_cancel_sign_in,
             commands::github_connect_start,

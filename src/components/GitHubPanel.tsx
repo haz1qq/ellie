@@ -48,7 +48,10 @@ export function GitHubPanel({ native }: { native: boolean }) {
 
   const connected = connectionStatus?.state === "Connected";
   const authorizing = connectionStatus?.state === "Authorizing";
-  const needsClientId = connectionStatus !== null && !connectionStatus.clientIdConfigured;
+  const needsAppCredentials =
+    connectionStatus !== null &&
+    (!connectionStatus.clientIdConfigured ||
+      !connectionStatus.clientSecretConfigured);
   const statusError = connectionStatus?.lastError
     ? githubErrorCopyOf(connectionStatus.lastError)
     : "";
@@ -208,9 +211,10 @@ export function GitHubPanel({ native }: { native: boolean }) {
               </p>
             </>
           )}
-          {needsClientId && (
+          {needsAppCredentials && (
             <p className="github-hint">
-              Add your GitHub App Client ID in Settings → GitHub before connecting.
+              Add your GitHub App Client ID and Client Secret in Settings → GitHub
+              before connecting.
             </p>
           )}
           {visibleError && (
@@ -235,7 +239,7 @@ export function GitHubPanel({ native }: { native: boolean }) {
           ) : (
             <button
               type="button"
-              disabled={busy || needsClientId || connectionStatus === null}
+              disabled={busy || needsAppCredentials || connectionStatus === null}
               onClick={() => void connection.signIn()}
             >
               Connect GitHub account

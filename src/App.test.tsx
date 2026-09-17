@@ -22,6 +22,7 @@ vi.mock("./lib/desktop", () => ({
     refreshProvider: vi.fn(),
     githubConnectionStatus: vi.fn(),
     githubSaveClientId: vi.fn(),
+    githubSaveClientSecret: vi.fn(),
     githubSignIn: vi.fn(),
     githubCancelSignIn: vi.fn(),
     githubDisconnect: vi.fn(),
@@ -197,6 +198,7 @@ beforeEach(() => {
     lastError: null,
     tokenPresent: false,
     clientIdConfigured: false,
+    clientSecretConfigured: false,
   });
   vi.mocked(desktop.githubListRepositories).mockResolvedValue([]);
   vi.mocked(desktop.githubListCommits).mockResolvedValue([]);
@@ -872,7 +874,9 @@ describe("bootstrap shell", () => {
     expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeDisabled();
     expect(screen.getByLabelText("GitHub App Client ID")).toBeEnabled();
     expect(
-      screen.getByText(/refresh token is stored in Windows Credential Manager/),
+      screen.getByText(
+        /App Client Secret and refresh token are stored in Windows Credential Manager/,
+      ),
     ).toBeVisible();
   });
 });
