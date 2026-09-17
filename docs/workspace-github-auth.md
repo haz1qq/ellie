@@ -81,7 +81,7 @@ Proposed permission consent (single authorization, two documented capabilities):
 - Sign-in is Rust-owned; the WebView never handles the token. The exchange completes on a loopback URL consumed by Rust (or the device-flow poll), then only the **refresh token** is stored in Windows Credential Manager under a dedicated Ellie GitHub identity. The 8-hour user access token lives in memory and is regenerated on demand.
 - Never log tokens, authorization headers, raw bodies, commit subjects, task notes, or private repository names. No browser/CLI credential scraping; no client secret shipped.
 - Rate-limit and secondary-limit handling from verified limits above; conditional requests and bounded pagination per backend design.
-- `127.0.0.1` redirect only; the existing local API opt-in/token rules are unchanged and workspace data is not exposed to it.
+- `127.0.0.1` redirect only; the callback accepts exactly one `code`, one `state`, and GitHub's optional RFC 9207 `iss` parameter only when it equals `https://github.com/login/oauth`. Unknown, duplicate, or mismatched parameters are rejected. The existing local API opt-in/token rules are unchanged and workspace data is not exposed to it.
 
 ## 7. Confirm at registration / live verification (W2)
 

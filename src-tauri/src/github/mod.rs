@@ -1402,7 +1402,9 @@ mod tests {
             .expect("state");
         let redirect = Url::parse(&redirect_uri).expect("redirect URL");
         let port = redirect.port().expect("redirect port");
-        let target = format!("{callback_path}?code=sanitized-code&state={state}");
+        let target = format!(
+            "{callback_path}?code=sanitized-code&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth&state={state}"
+        );
         let mut stream = TcpStream::connect(("127.0.0.1", port))
             .await
             .expect("connect loopback callback");

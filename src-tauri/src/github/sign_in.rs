@@ -7,6 +7,7 @@ use tokio::{
 use super::GitHubError;
 
 pub(crate) const CALLBACK_PATH: &str = "/callback";
+const GITHUB_OAUTH_ISSUER: &str = "https://github.com/login/oauth";
 const MAX_CALLBACK_REQUEST_BYTES: usize = 8 * 1024;
 const SUCCESS_PAGE: &str =
     "<!doctype html><html><body>GitHub sign-in complete. You can close this window.</body></html>";
@@ -86,10 +87,14 @@ fn parse_request(request: &[u8]) -> Result<CallbackParameters, GitHubError> {
 
     let mut code = None;
     let mut state = None;
+    let mut issuer = None;
     for (key, value) in url.query_pairs() {
         let slot = match key.as_ref() {
             "code" => &mut code,
             "state" => &mut state,
+            // GitHub includes the RFC 9207 authorization-server issuer in
+            // successful callbacks. Accept it only when it identifies GitHub.
+            "iss" => &mut issuer,
             _ => return Err(GitHubError::invalid_input()),
         };
         if slot.replace(value.into_owned()).is_some() {
@@ -98,8 +103,11 @@ fn parse_request(request: &[u8]) -> Result<CallbackParameters, GitHubError> {
     }
     let code = code.filter(|value| !value.is_empty());
     let state = state.filter(|value| !value.is_empty());
-    match (code, state) {
-        (Some(code), Some(state)) => Ok(CallbackParameters { code, state }),
+    let issuer_is_valid = issuer
+        .as_deref()
+        .is_none_or(|value| value == GITHUB_OAUTH_ISSUER);
+    match (code, state, issuer_is_valid) {
+        (Some(code), Some(state), true) => Ok(CallbackParameters { code, state }),
         _ => Err(GitHubError::invalid_input()),
     }
 }
@@ -111,7 +119,7 @@ mod tests {
     #[test]
     fn callback_parser_accepts_only_one_code_and_state_on_the_callback_path() {
         let parsed = parse_request(
-            b"GET /callback?code=sanitized-code&state=sanitized-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            b"GET /callback?code=sanitized-code&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth&state=sanitized-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         )
         .expect("valid callback");
         assert_eq!(parsed.code, "sanitized-code");
@@ -122,6 +130,8 @@ mod tests {
             "GET /other?code=a&state=b HTTP/1.1\r\n\r\n",
             "GET /callback?code=a&state=b&extra=c HTTP/1.1\r\n\r\n",
             "GET /callback?code=a&code=b&state=c HTTP/1.1\r\n\r\n",
+            "GET /callback?code=a&state=b&iss=https%3A%2F%2Fevil.example HTTP/1.1\r\n\r\n",
+            "GET /callback?code=a&state=b&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth HTTP/1.1\r\n\r\n",
             "GET /callback?code=a HTTP/1.1\r\n\r\n",
         ] {
             assert!(parse_request(request.as_bytes()).is_err(), "{request}");
