@@ -6,6 +6,11 @@
 - Read `PROJECT.md` before architectural decisions and `AGENTS.md` before code changes. Inspect relevant code and milestone status; preserve working architecture unless a change is justified.
 - Initial providers: OpenAI / Codex, Anthropic / Claude, and DeepSeek. Defer other providers and future features until their milestone is active.
 
+## Delegated model routing
+- For operator-requested delegation, use `frontend` (`opencode-go/deepseek-v4-flash`, high thinking) for interface design and `backend` (`openai-codex/gpt-5.6-sol`, xhigh thinking) for backend work.
+- The owner authorizes `backend-backup` (`opencode-go/glm-5.3`, default thinking) when the primary backend model exhausts Codex usage limits. Keep Codex as the primary; do not switch for unrelated failures.
+- Pi resolves one model per launch, not automatic in-run fallback. Report the quota failure, preserve partial output/diff and verification state, ensure the prior writer has stopped, then explicitly launch the backup with a bounded continuation handoff. Do not change execution protocols or run concurrent writers in the same checkout.
+
 ## Personality and visual identity
 - Ellie is named after the owner's black-and-white cat: affectionate, clingy, cute, funny, and a little mischievous. Make the app feel like a quiet companion while the user works.
 - Apply this identity from the first dashboard shell: ink black, warm white, soft gray, restrained pink accents, a simple black-and-white cat mascot, and a legible cat tray icon. Keep dark mode first and preserve accessible contrast and recognizable status colors.
@@ -54,6 +59,7 @@
 
 ## Milestone discipline
 - Work on one agreed milestone or scoped task at a time. Do not continue into the next milestone without explicit instruction.
+- The workspace expansion is currently documentation-only: GitHub track/create, local tasks, dashboard and expanded HUD are proposed in `docs/workspace-upgrade.md`, `docs/workspace-interface.md`, and `docs/workspace-backend.md`. Their W1–W6 phases supplement the original roadmap; no phase is authorized for implementation merely because its design exists.
 - Follow the specification sequence: 0 bootstrap; 1 provider framework; 2 SQLite/history; 3 OpenAI/Codex; 4 Claude; 5 DeepSeek; 6 polling; 7 notifications; 8 local API; 9 analytics; 10 Windows packaging. Milestone 0 includes no provider integrations; the future CLI is outside v0.1.
 - Deliver a working vertical slice before expanding scope. Keep mocks visibly marked; never mark a provider integration complete using mocks alone.
 - Defer floating bars, charts, extra providers, and other future features until scheduled. Do not let optional features block the active milestone.
