@@ -57,6 +57,9 @@ pub enum GitHubErrorCategory {
     AuthorizationStateMismatch,
     AuthorizationDenied,
     AppCredentialsInvalid,
+    TokenExpirationRequired,
+    TokenResponseInvalid,
+    AccountResponseInvalid,
     AuthenticationRequired,
     AuthenticationExpired,
     RateLimited,
@@ -103,6 +106,18 @@ impl GitHubError {
 
     pub(crate) const fn app_credentials_invalid() -> Self {
         Self::new(GitHubErrorCategory::AppCredentialsInvalid)
+    }
+
+    pub(crate) const fn token_expiration_required() -> Self {
+        Self::new(GitHubErrorCategory::TokenExpirationRequired)
+    }
+
+    pub(crate) const fn token_response_invalid() -> Self {
+        Self::new(GitHubErrorCategory::TokenResponseInvalid)
+    }
+
+    const fn account_response_invalid() -> Self {
+        Self::new(GitHubErrorCategory::AccountResponseInvalid)
     }
 
     const fn authentication_required() -> Self {
@@ -162,6 +177,15 @@ impl fmt::Display for GitHubError {
             GitHubErrorCategory::AuthorizationDenied => "GitHub authorization was denied",
             GitHubErrorCategory::AppCredentialsInvalid => {
                 "the GitHub App client credentials were rejected"
+            }
+            GitHubErrorCategory::TokenExpirationRequired => {
+                "GitHub did not return an expiring user token"
+            }
+            GitHubErrorCategory::TokenResponseInvalid => {
+                "GitHub returned unsupported token metadata"
+            }
+            GitHubErrorCategory::AccountResponseInvalid => {
+                "GitHub returned an unexpected account response"
             }
             GitHubErrorCategory::AuthenticationRequired => "GitHub authentication is required",
             GitHubErrorCategory::AuthenticationExpired => "GitHub authentication has expired",
@@ -908,7 +932,7 @@ impl GitHubService {
         let url = self.api_url("/user")?;
         let response = self.send_api_get(url, access_token).await?;
         ensure_api_success(&response)?;
-        parse_user(&response.body)
+        parse_user(&response.body).map_err(|_| GitHubError::account_response_invalid())
     }
 
     async fn authorized_get(&self, url: Url) -> Result<ApiResponse, GitHubError> {
@@ -2383,7 +2407,10 @@ mod tests {
                 .await
                 .expect_err("malformed user");
             server.await.expect("mock server");
-            assert_eq!(error.category(), GitHubErrorCategory::MalformedResponse);
+            assert_eq!(
+                error.category(),
+                GitHubErrorCategory::AccountResponseInvalid
+            );
         }
     }
 

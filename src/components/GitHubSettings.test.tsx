@@ -191,6 +191,23 @@ describe("GitHub Settings section", () => {
     expect(screen.getByText(/fetched on demand and are not stored by Ellie/)).toBeVisible();
   });
 
+  it.each([
+    ["token_expiration_required", /non-expiring user token without a refresh token/],
+    ["token_response_invalid", /token metadata Ellie cannot safely use/],
+    ["account_response_invalid", /account response was not usable/],
+  ] as const)(
+    "shows actionable redacted auth diagnostic for %s",
+    async (category, expected) => {
+      vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
+        ...configured,
+        lastError: category,
+      });
+      render(<GitHubSettings native />);
+      expect(await screen.findByRole("alert")).toHaveTextContent(expected);
+      expect(screen.queryByText(category)).not.toBeInTheDocument();
+    },
+  );
+
   it("maps command failures to friendly copy and never shows raw categories", async () => {
     const user = userEvent.setup();
     vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(configured);

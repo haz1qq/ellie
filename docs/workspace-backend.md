@@ -133,7 +133,7 @@ Tests use sanitized fixtures and local `127.0.0.1` mock servers only; only produ
 2. The App `client_id` is not persisted anywhere, so W2b must add it as non-secret configuration (Settings/IPC) before restore can work.
 3. The connection record (account id/login, status) is in memory only and is not persisted to SQLite; W2b adds the `github_connection` table and migration after the current latest schema.
 4. `github_connect_start` leaves the service in `Authorizing` until completion or an explicit `github_disconnect`; there is no expiry timer for an abandoned authorization.
-5. Token parsing requires the documented exact expiry values (`28800` / `15897600`) and raises `MalformedResponse` on drift; confirm during live verification.
+5. Token parsing initially required exact expiry values and fixed token prefixes. Live verification exposed a generic `MalformedResponse`; the parser now treats tokens as opaque bounded values, accepts positive bounded provider-reported lifetimes, still requires refresh-token fields, and returns redacted stage-specific categories for missing expiration fields, unsupported token metadata, or an unusable account response.
 6. No GitHub events are emitted and no UI consumes these commands yet (W5 wiring).
 7. Live verification remains outstanding: real GitHub App consent, real Windows Credential Manager writes, and refresh-token rotation behavior.
 
@@ -172,7 +172,9 @@ Implemented: dedicated `github_app_client_secret` Credential Manager entry; main
 
 Parent verification passed: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (123 library + 32 CLI tests); `npm run typecheck`; `npm run lint`; `npm test` (7 files, 103 tests); and `npm run build`.
 
-Live sign-in must be retried after the owner generates and saves an App Client Secret in Settings. Repository/commit loading, restart restore, refresh-token rotation, and disconnect remain live-verification items until that retry succeeds.
+Live verification subsequently reached token/account response validation but surfaced only the generic `malformed_response` category. The parser now returns `token_expiration_required`, `token_response_invalid`, or `account_response_invalid` without logging bodies, tokens, or field values. Token strings are treated as opaque bounded credentials rather than relying on provider prefixes; provider-reported expirations are accepted only when positive and within bounded access/refresh limits. A fresh sign-in will therefore either complete if the issue was harmless prefix/lifetime drift or identify the failing stage safely. Parent verification passed: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (124 library + 32 CLI tests); `npm run typecheck`; `npm run lint`; `npm test` (7 files, 106 tests); and `npm run build`.
+
+Repository/commit loading, restart restore, refresh-token rotation, and disconnect remain live-verification items until sign-in succeeds.
 
 ## Acceptance and remaining decisions
 
