@@ -389,9 +389,10 @@ pub async fn github_list_commits(
 pub async fn github_contribution_calendar(
     window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
+    query: crate::github::ContributionCalendarQuery,
 ) -> Result<crate::github::ContributionCalendar, crate::github::GitHubError> {
     require_github_main_window(window.label())?;
-    app_state.github.contribution_calendar().await
+    app_state.github.contribution_calendar(query).await
 }
 
 #[tauri::command]

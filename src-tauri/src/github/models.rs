@@ -66,6 +66,14 @@ pub struct ContributionCalendar {
     pub weeks: Vec<ContributionWeek>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionCalendarQuery {
+    /// Calendar year boundary. `None` means GitHub's rolling last-year window.
+    #[serde(default)]
+    pub year: Option<u32>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryCreationInput {
@@ -478,6 +486,25 @@ pub(crate) fn validate_branch(value: &str) -> Result<(), GitHubError> {
     Ok(())
 }
 
+/// GitHub launched in 2008; older years have no contribution calendar.
+pub(crate) const EARLIEST_SUPPORTED_YEAR: u32 = 2008;
+
+/// Resolves the optional calendar-year filter to a UTC `[start, end]` window.
+/// `None` keeps GitHub's default rolling last-year window.
+pub(crate) fn contribution_calendar_window(
+    year: Option<u32>,
+    current_year: i32,
+) -> Result<Option<(NaiveDate, NaiveDate)>, GitHubError> {
+    let Some(year) = year else { return Ok(None) };
+    let year_i32 = i32::try_from(year).map_err(|_| GitHubError::invalid_input())?;
+    if year < EARLIEST_SUPPORTED_YEAR || year_i32 > current_year {
+        return Err(GitHubError::invalid_input());
+    }
+    let start = NaiveDate::from_ymd_opt(year_i32, 1, 1).ok_or_else(GitHubError::invalid_input)?;
+    let end = NaiveDate::from_ymd_opt(year_i32, 12, 31).ok_or_else(GitHubError::invalid_input)?;
+    Ok(Some((start, end)))
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct BoundedPagination {
     current_page: usize,
@@ -629,6 +656,25 @@ mod tests {
                 .category(),
             crate::github::GitHubErrorCategory::PermissionDenied
         );
+    }
+
+    #[test]
+    fn contribution_calendar_years_resolve_windows_and_reject_future_or_ancient_years() {
+        assert_eq!(
+            contribution_calendar_window(None, 2026),
+            Ok(None),
+            "no filter keeps GitHub's rolling window"
+        );
+        assert_eq!(
+            contribution_calendar_window(Some(2025), 2026).expect("2025 window"),
+            Some((
+                NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+            ))
+        );
+        assert!(contribution_calendar_window(Some(2027), 2026).is_err());
+        assert!(contribution_calendar_window(Some(2007), 2026).is_err());
+        assert!(contribution_calendar_window(Some(0), 2026).is_err());
     }
 
     #[test]

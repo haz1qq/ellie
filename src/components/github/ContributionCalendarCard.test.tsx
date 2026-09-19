@@ -2,6 +2,10 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { desktop } from "../../lib/desktop";
+import {
+  contributionQueryOf,
+  yearOptions,
+} from "../../lib/githubContributions";
 import { ContributionCalendarCard } from "./ContributionCalendarCard";
 
 vi.mock("../../lib/desktop", () => ({
@@ -78,5 +82,15 @@ describe("ContributionCalendarCard", () => {
     await screen.findByText(/3 contributions in the last year/);
     await userEvent.setup().click(screen.getByRole("button", { name: /Refresh/ }));
     expect(desktop.githubContributionCalendar).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps the yearly filter to the typed IPC query", async () => {
+    renderCard();
+    await screen.findByText(/3 contributions in the last year/);
+    expect(desktop.githubContributionCalendar).toHaveBeenLastCalledWith({});
+    expect(contributionQueryOf("rolling")).toEqual({});
+    expect(contributionQueryOf("2025")).toEqual({ year: 2025 });
+    expect(yearOptions().some((option) => option.value === "2025")).toBe(true);
+    expect(yearOptions()[0]).toEqual({ value: "rolling", label: "Last 12 months" });
   });
 });

@@ -255,6 +255,9 @@ export interface GitHubContributionCalendar {
   endedOn: string;
   weeks: GitHubContributionWeek[];
 }
+export interface GitHubContributionCalendarQuery {
+  year?: number;
+}
 
 export interface RepositoryCreationInput {
   name: string;
@@ -384,8 +387,8 @@ export const desktop = {
       repo,
       branch: branch || undefined,
     }),
-  githubContributionCalendar: () =>
-    invoke<GitHubContributionCalendar>("github_contribution_calendar"),
+  githubContributionCalendar: (query?: GitHubContributionCalendarQuery) =>
+    invoke<GitHubContributionCalendar>("github_contribution_calendar", { query: query ?? {} }),
   githubPrepareRepositoryCreation: (input: RepositoryCreationInput) =>
     invoke<RepositoryCreationReview>("github_prepare_repository_creation", {
       input,

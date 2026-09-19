@@ -1407,6 +1407,28 @@ textarea.textarea {
   margin-top: 2px;
 }
 
+/* Full-width Overview placement after the card swap: keep the Focus card
+   compact as a horizontal strip instead of a tall empty panel. */
+.panel-focus .focus-task {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.panel-focus .focus-task-title {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.panel-focus .focus-task-actions {
+  margin-left: auto;
+}
+
+.panel-focus .focus-task-notes {
+  flex-basis: 100%;
+}
+
 /* --------------------------------- commits -------------------------------- */
 
 .commit-feed {
@@ -2090,6 +2112,7 @@ textarea.textarea {
 
 .contribution-panel {
   overflow: hidden;
+  container-type: inline-size;
 }
 
 .contribution-panel-header {
@@ -2110,14 +2133,23 @@ textarea.textarea {
 
 .contribution-calendar-canvas {
   width: max-content;
-  min-width: 100%;
+}
+
+/* Column 1 holds the weekday labels; every following implicit column is one
+   week. `grid-auto-columns` avoids `repeat(var(--weeks), …)`, where a var()
+   repetition count is invalid CSS and would collapse the whole template. */
+.contribution-months,
+.contribution-weeks {
+  display: grid;
+  grid-template-columns: 30px;
+  grid-auto-columns: minmax(9px, 20px);
+  grid-auto-flow: column;
+  gap: 2px;
 }
 
 .contribution-months {
-  display: grid;
-  gap: 3px;
-  height: 14px;
-  margin: 0 0 4px 38px;
+  height: 15px;
+  margin-bottom: 4px;
   color: var(--muted);
   font-size: 10px;
 }
@@ -2128,40 +2160,48 @@ textarea.textarea {
   text-overflow: ellipsis;
 }
 
-.contribution-calendar-body {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px;
+.contribution-weeks {
+  grid-auto-rows: auto;
+  width: max-content;
 }
 
-.contribution-weekdays {
-  display: grid;
-  grid-template-rows: repeat(7, 11px);
-  gap: 3px;
+.contribution-weekday-label {
+  align-self: center;
   color: var(--muted);
   font-size: 9px;
-  line-height: 11px;
-}
-
-.contribution-weeks {
-  display: grid;
-  gap: 3px;
-}
-
-.contribution-week {
-  display: grid;
-  grid-template-rows: repeat(7, 11px);
-  gap: 3px;
-  align-content: start;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .contribution-cell {
   display: inline-block;
-  width: 11px;
-  height: 11px;
+  width: 100%;
+  aspect-ratio: 1;
   border: 1px solid rgba(255, 255, 255, 0.035);
-  border-radius: 2px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.045);
+  animation: contribution-pop 320ms ease-out both;
+  animation-delay: calc(var(--i, 0) * 14ms);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-radius 120ms ease;
+}
+
+@keyframes contribution-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.contribution-cell:hover {
+  transform: scale(1.45);
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px var(--focus);
+  z-index: 1;
+  position: relative;
 }
 
 .contribution-level-1 { background: rgba(238, 174, 196, 0.24); }
@@ -2187,6 +2227,15 @@ textarea.textarea {
   text-transform: none;
 }
 
+/* Legend swatches are fixed squares; grid cells size to their track instead. */
+.contribution-legend .contribution-cell {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  aspect-ratio: auto;
+  animation: none;
+}
+
 .contribution-note {
   margin-top: 8px;
   color: var(--muted);
@@ -2194,6 +2243,14 @@ textarea.textarea {
   line-height: 1.5;
   border-top: 1px solid var(--border);
   padding-top: 8px;
+}
+
+/* Tight side-column context: shrink month labels; the grid scrolls sideways
+   with legible cells rather than collapsing into invisible dots. */
+@container (max-width: 520px) {
+  .contribution-months span {
+    font-size: 8px;
+  }
 }
 
 /* --------------------------- creation outcome ----------------------------- */

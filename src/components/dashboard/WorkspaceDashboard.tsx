@@ -191,15 +191,11 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
           <TokenTrendCard analytics={analytics.analytics} />
         </div>
         <div className="bento-side">
-          <FocusTaskCard
-            pinnedTask={pinnedTask}
-            tasks={tasks.tasks}
-            busy={tasks.busy}
+          <ContributionCalendarCard
             native={native}
-            onOpenTodo={() => onNavigate("todos")}
-            onEdit={onEditTask}
-            onComplete={(taskId) => void tasks.setCompleted(taskId, true)}
-            onUnpin={() => void tasks.setPinned(null)}
+            connected={githubConnected}
+            login={githubLogin}
+            onOpenGitHub={() => onNavigate("github")}
           />
           <RecentCommitsCard
             native={native}
@@ -210,11 +206,15 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
         </div>
       </div>
 
-      <ContributionCalendarCard
+      <FocusTaskCard
+        pinnedTask={pinnedTask}
+        tasks={tasks.tasks}
+        busy={tasks.busy}
         native={native}
-        connected={githubConnected}
-        login={githubLogin}
-        onOpenGitHub={() => onNavigate("github")}
+        onOpenTodo={() => onNavigate("todos")}
+        onEdit={onEditTask}
+        onComplete={(taskId) => void tasks.setCompleted(taskId, true)}
+        onUnpin={() => void tasks.setPinned(null)}
       />
 
       <div className="dashboard-lower">
