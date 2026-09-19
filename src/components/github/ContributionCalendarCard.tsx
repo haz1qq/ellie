@@ -1,13 +1,19 @@
 import { Activity, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   desktop,
   type GitHubContributionCalendar,
   type GitHubContributionWeek,
 } from "../../lib/desktop";
+import {
+  contributionQueryOf,
+  yearOptions,
+  type ContributionYear,
+} from "../../lib/githubContributions";
 import { githubErrorText } from "../../lib/github";
 import { Button } from "../ui/Button";
 import { EmptyState, Spinner } from "../ui/Panel";
+import { Select } from "../ui/Select";
 
 function dateLabel(value: string): string {
   const date = new Date(`${value}T00:00:00Z`);
@@ -49,6 +55,7 @@ export function ContributionCalendarCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [year, setYear] = useState<ContributionYear>("rolling");
 
   useEffect(() => {
     if (!native || !connected) {
@@ -60,8 +67,9 @@ export function ContributionCalendarCard({
     let active = true;
     setLoading(true);
     setError("");
+    const query = contributionQueryOf(year);
     void desktop
-      .githubContributionCalendar()
+      .githubContributionCalendar(query)
       .then((value) => {
         if (active) setCalendar(value);
       })
@@ -77,22 +85,31 @@ export function ContributionCalendarCard({
     return () => {
       active = false;
     };
-  }, [native, connected, login, reload]);
+  }, [native, connected, login, reload, year]);
 
+  const weekCount = calendar?.weeks.length ?? 52;
+  const gridStyle = useMemo<CSSProperties>(
+    () => ({ "--weeks": weekCount } as CSSProperties),
+    [weekCount],
+  );
   const monthLabels = useMemo(
     () => calendar?.weeks.map(monthLabel) ?? [],
     [calendar],
   );
+  const periodTitle = year === "rolling" ? "in the last year" : `in ${year}`;
 
   return (
-    <section className="panel contribution-panel" aria-labelledby="contribution-calendar-title">
+    <section
+      className="panel contribution-panel"
+      aria-labelledby="contribution-calendar-title"
+    >
       <header className="panel-header contribution-panel-header">
         <div className="panel-title">
           <span className="panel-kicker">GitHub profile</span>
           <h2 className="panel-heading" id="contribution-calendar-title">
             <Activity size={15} className="panel-heading-icon" />
             {calendar
-              ? `${calendar.totalContributions.toLocaleString()} contributions in the last year`
+              ? `${calendar.totalContributions.toLocaleString()} contributions ${periodTitle}`
               : "Contribution activity"}
           </h2>
           {connected && login ? (
@@ -102,6 +119,13 @@ export function ContributionCalendarCard({
           ) : null}
         </div>
         <div className="panel-actions">
+          <Select
+            label="Contribution period"
+            value={year}
+            onValueChange={setYear}
+            options={yearOptions()}
+            disabled={!connected || !native}
+          />
           {connected && native ? (
             <Button
               size="sm"
@@ -120,7 +144,9 @@ export function ContributionCalendarCard({
 
       {!native ? (
         <EmptyState title="Available in the Windows app">
-          <p className="empty-state-text">Connect GitHub in Ellie to load your profile activity.</p>
+          <p className="empty-state-text">
+            Connect GitHub in Ellie to load your profile activity.
+          </p>
         </EmptyState>
       ) : !connected ? (
         <EmptyState icon={<Activity size={18} />} title="GitHub not connected">
@@ -145,16 +171,23 @@ export function ContributionCalendarCard({
           <div className="contribution-calendar-scroll">
             <div
               className="contribution-calendar-canvas"
+              style={gridStyle}
               role="img"
               aria-label={`${calendar.totalContributions} GitHub profile contributions for ${login ?? "the connected account"} from ${calendar.startedOn} through ${calendar.endedOn}.`}
             >
               <div
                 className="contribution-months"
-                style={{ gridTemplateColumns: `repeat(${calendar.weeks.length}, 11px)` }}
                 aria-hidden="true"
               >
                 {monthLabels.map((label, index) =>
-                  label ? <span key={`${calendar.weeks[index]?.firstDay ?? index}-${label}`} style={{ gridColumn: index + 1 }}>{label}</span> : null,
+                  label ? (
+                    <span
+                      key={`${calendar.weeks[index]?.firstDay ?? index}-${label}`}
+                      style={{ gridColumn: index + 1 }}
+                    >
+                      {label}
+                    </span>
+                  ) : null,
                 )}
               </div>
               <div className="contribution-calendar-body">
@@ -163,17 +196,18 @@ export function ContributionCalendarCard({
                   <span style={{ gridRow: 4 }}>Wed</span>
                   <span style={{ gridRow: 6 }}>Fri</span>
                 </div>
-                <div
-                  className="contribution-weeks"
-                  style={{ gridTemplateColumns: `repeat(${calendar.weeks.length}, 11px)` }}
-                >
-                  {calendar.weeks.map((week) => (
+                <div className="contribution-weeks">
+                  {calendar.weeks.map((week, weekIndex) => (
                     <div className="contribution-week" key={week.firstDay}>
-                      {week.days.map((day) => (
+                      {week.days.map((day, dayIndex) => (
                         <span
                           key={day.date}
                           className={`contribution-cell contribution-level-${day.level}`}
-                          style={{ gridRow: day.weekday + 1 }}
+                          style={{
+                            gridRow: day.weekday + 1,
+                            gridColumn: weekIndex + 1,
+                            "--i": Math.min(weekIndex * 7 + dayIndex, 60),
+                          } as CSSProperties}
                           title={`${dateLabel(day.date)}: ${day.contributionCount} contribution${day.contributionCount === 1 ? "" : "s"}`}
                           aria-hidden="true"
                         />

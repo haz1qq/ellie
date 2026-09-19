@@ -16,7 +16,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{Datelike, Duration as ChronoDuration, Utc};
 use reqwest::{
     header::{self, HeaderMap},
     Client, StatusCode, Url,
@@ -28,14 +28,15 @@ use auth::TokenSet;
 use connection_store::{GitHubConnectionStore, StoredConnection};
 use creation_store::{RepositoryCreationStore, StoredCreationAttempt, StoredCreationState};
 use models::{
-    parse_commits, parse_contribution_calendar, parse_repositories, parse_repository, parse_user,
-    validate_branch, validate_new_repository_name, validate_repository_identifier,
-    BoundedPagination,
+    contribution_calendar_window, parse_commits, parse_contribution_calendar, parse_repositories,
+    parse_repository, parse_user, validate_branch, validate_new_repository_name,
+    validate_repository_identifier, BoundedPagination,
 };
 pub use models::{
-    CommitSummary, ContributionCalendar, ContributionDay, ContributionWeek, GitHubAccount,
-    RepositoryCreationAttemptState, RepositoryCreationAttemptStatus, RepositoryCreationInput,
-    RepositoryCreationResolution, RepositoryCreationReview, RepositorySummary,
+    CommitSummary, ContributionCalendar, ContributionCalendarQuery, ContributionDay,
+    ContributionWeek, GitHubAccount, RepositoryCreationAttemptState,
+    RepositoryCreationAttemptStatus, RepositoryCreationInput, RepositoryCreationResolution,
+    RepositoryCreationReview, RepositorySummary,
 };
 
 pub const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
@@ -45,9 +46,9 @@ pub const CLIENT_SECRET_ACCOUNT: &str = "github_app_client_secret";
 
 const API_VERSION: &str = "2022-11-28";
 const CONTRIBUTION_CALENDAR_QUERY: &str = r#"
-query EllieContributionCalendar($login: String!) {
+query EllieContributionCalendar($login: String!, $from: DateTime, $to: DateTime) {
   user(login: $login) {
-    contributionsCollection {
+    contributionsCollection(from: $from, to: $to) {
       contributionCalendar {
         totalContributions
         weeks {
@@ -993,13 +994,19 @@ impl GitHubService {
         Ok(output)
     }
 
-    pub async fn contribution_calendar(&self) -> Result<ContributionCalendar, GitHubError> {
-        let result = self.contribution_calendar_inner().await;
+    pub async fn contribution_calendar(
+        &self,
+        query: ContributionCalendarQuery,
+    ) -> Result<ContributionCalendar, GitHubError> {
+        let result = self.contribution_calendar_inner(query).await;
         self.record_result(&result);
         result
     }
 
-    async fn contribution_calendar_inner(&self) -> Result<ContributionCalendar, GitHubError> {
+    async fn contribution_calendar_inner(
+        &self,
+        query: ContributionCalendarQuery,
+    ) -> Result<ContributionCalendar, GitHubError> {
         self.restore_if_needed().await?;
         let login = self
             .connection
@@ -1009,10 +1016,23 @@ impl GitHubService {
             .as_ref()
             .map(|account| account.login.clone())
             .ok_or_else(GitHubError::authentication_required)?;
+        let current_year = Utc::now().year();
+        let window = contribution_calendar_window(query.year, current_year)?;
+        let (from, to) = match window {
+            Some((start, end)) => (
+                Some(format!("{start}T00:00:00Z")),
+                Some(format!("{end}T23:59:59Z")),
+            ),
+            None => (None, None),
+        };
         let url = self.api_url("/graphql")?;
         let payload = GraphQlRequest {
             query: CONTRIBUTION_CALENDAR_QUERY,
-            variables: GraphQlVariables { login: &login },
+            variables: GraphQlVariables {
+                login: &login,
+                from: from.as_deref(),
+                to: to.as_deref(),
+            },
         };
         let response = self.authorized_post_json(url, &payload).await?;
         parse_contribution_calendar(&response.body)
@@ -1766,6 +1786,10 @@ struct GraphQlRequest<'a> {
 #[derive(Serialize)]
 struct GraphQlVariables<'a> {
     login: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -2904,7 +2928,7 @@ mod tests {
         mark_connected(&service, store.as_ref()).await;
 
         let calendar = service
-            .contribution_calendar()
+            .contribution_calendar(crate::github::models::ContributionCalendarQuery::default())
             .await
             .expect("contribution calendar");
         server.await.expect("mock server");
@@ -2916,6 +2940,38 @@ mod tests {
         assert!(request.starts_with("POST /graphql HTTP/1.1"));
         assert!(request.contains("EllieContributionCalendar"));
         assert!(request.contains(r#""login":"octo-cat""#));
+        assert!(!request.contains(r#"\"from\":\""#));
+        assert!(!request.contains(r#"\"to\":\""#));
+    }
+
+    #[tokio::test]
+    async fn passes_a_calendar_year_window_to_graphql_and_omits_it_by_default() {
+        let body = r#"{"data":{"user":{"contributionsCollection":{"contributionCalendar":{"totalContributions":2,"weeks":[{"firstDay":"2025-01-01","contributionDays":[{"contributionCount":2,"contributionLevel":"FIRST_QUARTILE","date":"2025-01-01","weekday":3}]}]}}}}}"#;
+        let y = |query: crate::github::models::ContributionCalendarQuery| async move {
+            let (base, requests, server) = serve_sequence(vec![MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: body.to_string(),
+            }])
+            .await;
+            let store = Arc::new(MemoryStore::default());
+            let service = test_service(&base, store.clone(), ServiceLimits::default());
+            mark_connected(&service, store.as_ref()).await;
+            service
+                .contribution_calendar(query)
+                .await
+                .expect("contribution calendar");
+            server.await.expect("mock server");
+            let request = &requests.lock().expect("requests")[0];
+            (
+                request.contains(r#""from":"2025-01-01T00:00:00Z""#),
+                request.contains(r#""to":"2025-12-31T23:59:59Z""#),
+            )
+        };
+        let with_year =
+            y(crate::github::models::ContributionCalendarQuery { year: Some(2025) }).await;
+        assert!(with_year.0, "from boundary present");
+        assert!(with_year.1, "to boundary present");
     }
 
     #[tokio::test]
