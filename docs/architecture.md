@@ -1,6 +1,6 @@
 # Architecture
 
-For the **proposed, not implemented** workspace expansion, see [backend design](workspace-backend.md) and the [W1–W6 upgrade plan](workspace-upgrade.md). GitHub and local tasks remain separate domains from AI usage. The architecture below describes existing behavior.
+The main-window workspace expansion is implemented through W5; see [backend design](workspace-backend.md) and the [W1–W6 upgrade plan](workspace-upgrade.md). GitHub and local tasks remain separate domains from AI usage. The expanded HUD (W6) is still pending.
 
 The Tauri 2 executable owns application lifecycle, the Windows tray, settings, SQLite, and the provider framework. React consumes narrow Rust commands through `src/lib/desktop.ts`. The frontend does not receive filesystem paths, raw database access, or provider authentication.
 
@@ -9,8 +9,10 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/lib.rs` | Logging, startup, state, close-to-tray lifecycle |
 | `src-tauri/src/tray.rs` | Native tray menu and canonical main-window restore/focus/navigation path |
 | `src-tauri/src/mini_bar.rs` | Mini-window visibility and monitor-safe physical position restoration |
-| `src-tauri/src/commands.rs` | Typed IPC, serialized preference writes, and refresh commands |
+| `src-tauri/src/commands.rs` | Typed main-window IPC, serialized preference writes, refresh, tasks, and GitHub workspace commands |
 | `src-tauri/src/storage.rs` | Connection handling and transactional migrations |
+| `src-tauri/src/github/` | Rust-owned GitHub App auth, bounded repository/commit reads, personal repository prepare/confirm, uncertainty persistence |
+| `src-tauri/src/tasks.rs` | Validated local list/task persistence, filtering, completion, deletion guards, and Focus pin |
 | `src-tauri/src/local_api_token.rs` | Narrow shared app/CLI token validation, override precedence, fixed keyring identity |
 | `src-tauri/src/local_api.rs` | Serialized API opt-in/auth lifecycle, active authorization gate, redacted runtime status |
 | `src-tauri/src/credentials.rs` | Windows Credential Manager (keyring) key storage and key IPC status |
@@ -20,15 +22,23 @@ The Tauri 2 executable owns application lifecycle, the Windows tray, settings, S
 | `src-tauri/src/providers/` | Provider abstraction, registry, models, and adapters (mock, OpenAI/Codex, Anthropic/Claude, DeepSeek) |
 | `src-tauri/src/settings.rs` | Non-sensitive, strictly typed preferences |
 | `src-tauri/src/error.rs` | Redacted errors |
-| `src/App.tsx` | Dashboard and settings views |
+| `src/App.tsx`, `src/components/{layout,dashboard,providers,github,tasks,history,settings}/` | Six-view personal command center and typed domain pages |
 | `src/components/MiniBar.tsx`, `src/lib/miniQuota.ts` | Compact mini-window presentation and pure quota projection |
 | `src/components/Cat.tsx`, `src/copy.ts` | Static identity and optional copy |
 
 Startup initializes SQLite on a blocking worker and waits before exposing the application. Settings reads/writes run on blocking workers; writes are serialized by an async mutex. A native atomic preference controls close behavior and changes only after a successful database write. Connections have bounded busy timeouts and close after each operation.
 
-Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, 9 adds global notification thresholds, 10 adds mini-bar enablement, opacity, and physical position, and 11 adds the opt-in local API enable flag defaulting to false. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
+Migrations apply in order inside one transaction: 1 creates `application_settings`, 2 creates `providers`, `accounts`, `usage_snapshots`, `usage_windows`, `token_usage`, and notification tables, 7 adds provider visibility, 8 adds the notification enable/disable preference, 9 adds global notification thresholds, 10 adds mini-bar enablement, opacity, and physical position, 11 adds the opt-in local API enable flag, 12 adds non-secret GitHub connection metadata, 13 adds local lists/tasks and Focus state, and 14 adds minimal uncertain repository-creation attempt metadata. Reopening is idempotent; a newer schema fails safely and a failed migration rolls back. Timestamps are UTC ISO 8601. Every successful provider refresh is persisted with provenance (`data_kind` per snapshot; `provider_reported`/`locally_calculated` per metric); the latest snapshot, filtered/limited history, and retention cleanup (90 days default, run periodically on a background worker) live in `history.rs`.
 
 Tray navigation sets the intended view in native state and emits a window-scoped navigation event. The frontend subscribes before reading initial state, supporting early tray interactions. Left-click restores the overview; the Settings menu opens the settings view. The mini bar's open command uses that same main-window unminimize/show/focus/Overview helper. Refresh is enabled and routes through the same refresh coordinator as the dashboard and automatic poller. The main bootstrap also uses this shared emitting refresh path so an already-open mini window receives the completed startup data. Closing the main window hides it when close-to-tray is enabled; when disabled, Ellie exits and closes auxiliary windows rather than leaving an orphaned mini bar.
+
+## Workspace domains
+
+`GitHubService` is independent of `UsageProvider` and the AI refresh coordinator. Rust owns GitHub App credentials, the loopback OAuth callback, account/session generation, authorized HTTPS requests, input/response sanitization, and one-at-a-time personal repository creation. The WebView receives only normalized summaries and redacted categories. Commit pagination is presentation over the bounded selected-repository result; the Overview contribution calendar is fetched from the GitHub GraphQL API for the connected account, validated, and labeled as account-wide activity rather than a locally computed commit total.
+
+`TaskService` uses short-lived SQLite connections and immediate write transactions. Lists are case-insensitively unique; task text, priorities, calendar dates, and optional repository identity snapshots are validated in Rust. Delete-list confirmation is bound to the observed task count. Completing/deleting the pinned task clears Focus transactionally. Tasks do not call GitHub, do not become Issues, and survive GitHub disconnect.
+
+Repository creation uses an expiring immutable review bound to the account/session. Confirmation persists dispatch intent before one `POST /user/repos`; it never auto-retries. Timeout/lost response becomes an inspectable unknown outcome. Only a connected matching account can explicitly resolve the local warning, and resolution performs no remote write. Low-level OAuth code/state completion commands are not exposed through IPC.
 
 ## Mini floating bar
 
@@ -52,7 +62,7 @@ Temporary-database tests cover migration from schema 6, default visibility, pers
 
 ## Dependencies
 
-Tauri, React, TypeScript, Vite, and npm follow the specification. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides async coordination, timers, and networking; serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the provider API calls; keyring persists provider API keys in Windows Credential Manager. Axum serves the loopback local API. `getrandom` supplies OS-backed cryptographic randomness for managed API tokens (32 bytes; no custom PRNG). Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests.
+Tauri, React, TypeScript, Vite, and npm follow the specification. The main UI uses Radix UI interaction primitives, Lucide icons, Recharts for real-data charts, clsx for variants, and Sonner for accessible outcome toasts; Vite splits chart/primitives/visual vendor chunks. rusqlite uses bundled SQLite for a predictable Windows build. Tokio provides async coordination, timers, and networking; serde defines the IPC contract, thiserror defines redacted failures, and tracing emits structured lifecycle events. Chrono handles UTC timestamps. Reqwest (rustls) serves the provider API calls; keyring persists provider API keys in Windows Credential Manager. Axum serves the loopback local API. `getrandom` supplies OS-backed cryptographic randomness for managed API tokens (32 bytes; no custom PRNG). Vitest, Testing Library, and jsdom exercise frontend failure states; tempfile isolates Rust database tests.
 
 The provider framework (trait, registry, capabilities, provenance models, typed errors) is implemented with a clearly marked Ellie Demo mock adapter plus live adapters for OpenAI / Codex (codex app-server quota plus best-effort daily token activity over stdio), OpenAI API (documented Organization Usage API billing activity), Anthropic / Claude (documented Admin API usage and cost), and DeepSeek (documented balance endpoint). Authentication is reused (`codex login`) or key-based (`OPENAI_ADMIN_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`); Ellie never stores Codex tokens or logs secrets. OpenAI API billing is a separate provider/card so it is never combined with ChatGPT/Codex subscription quota or activity. Snapshots carry an explicit subscription flag so unsubscribed providers hide and reappear on resubscription, and unconfigured providers collapse until configured. No invented quota windows, balances, estimates, or reset times are displayed as account data.
 

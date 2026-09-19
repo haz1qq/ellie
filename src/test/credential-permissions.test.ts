@@ -11,11 +11,17 @@ const miniCapability = JSON.parse(read("src-tauri/capabilities/mini.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 const githubCommands = [
   "github_connection_status",
-  "github_connect_start",
-  "github_connect_complete",
+  "github_save_client_id",
+  "github_sign_in",
+  "github_cancel_sign_in",
   "github_disconnect",
   "github_list_repositories",
   "github_list_commits",
+  "github_contribution_calendar",
+  "github_prepare_repository_creation",
+  "github_confirm_repository_creation",
+  "github_repository_creation_status",
+  "github_resolve_repository_creation",
 ];
 
 // Mocked invoke calls cannot catch missing native permissions. Keep all
@@ -63,6 +69,10 @@ describe("credential IPC permissions", () => {
     expect(capability.permissions).toEqual([
       "core:event:allow-listen",
       "core:event:allow-unlisten",
+      {
+        identifier: "opener:allow-open-url",
+        allow: [{ url: "https://github.com/login/oauth/authorize?*" }],
+      },
       "allow-local-api-status",
       "allow-configure-local-api",
       "allow-get-bootstrap",
@@ -75,11 +85,29 @@ describe("credential IPC permissions", () => {
       "allow-delete-provider-key",
       "allow-provider-key-status",
       "allow-github-connection-status",
-      "allow-github-connect-start",
-      "allow-github-connect-complete",
+      "allow-github-save-client-id",
+      "allow-github-save-client-secret",
+      "allow-github-sign-in",
+      "allow-github-cancel-sign-in",
       "allow-github-disconnect",
       "allow-github-list-repositories",
       "allow-github-list-commits",
+      "allow-github-contribution-calendar",
+      "allow-github-prepare-repository-creation",
+      "allow-github-confirm-repository-creation",
+      "allow-github-repository-creation-status",
+      "allow-github-resolve-repository-creation",
+      "allow-task-bootstrap",
+      "allow-task-list",
+      "allow-task-create-list",
+      "allow-task-rename-list",
+      "allow-task-list-delete-preview",
+      "allow-task-delete-list",
+      "allow-task-create",
+      "allow-task-update",
+      "allow-task-set-completed",
+      "allow-task-delete",
+      "allow-task-set-pinned",
     ]);
   });
 

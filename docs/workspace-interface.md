@@ -1,6 +1,6 @@
 # Workspace interface design
 
-**Status: proposed, documentation only.** This document expands the [workspace upgrade plan](workspace-upgrade.md); it does not claim implemented features or verified visual behavior. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
+**Status: implemented for the main window; expanded HUD pending.** This document expands the [workspace upgrade plan](workspace-upgrade.md). GitHub browsing/creation, local lists/tasks, the six-view command-center hierarchy, and the integrated Overview are implemented on `feat/workspace-github`. The expanded HUD remains future work. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
 
 ## Preserve the existing application
 
@@ -149,6 +149,24 @@ Settings provides HUD hide/show, quota-only mode, section selection, opacity, an
 
 Use real navigation controls with current-page state, a skip-to-content link, visible focus, labeled fields, keyboard-operable dialogs with restored focus, and text alongside colors. Announce meaningful outcomes once; avoid announcing countdowns every second. External text is plain text, never executable HTML. Browser preview must remain clearly labeled and must not imply native persistence or live account access.
 
+## Command-center dashboard status (implemented on `feat/workspace-github`)
+
+The main app now uses a command-center shell with a left navigation rail (Overview, AI Usage, GitHub, To-do, History, Settings), a top action bar with a Ctrl+K quick-action palette, and a library-backed React UI. Overview derives every displayed value from existing typed AI, GitHub, task, and analytics data — no invented quota values, commit counts, or charts. It includes KPI cards, a provider summary sheet, a pinned Focus task card, a token-trend chart (Recharts), scoped recent commits, attention items, upcoming tasks, and a local activity feed. Disconnected GitHub shows an invitation rather than a zero; empty task state invites the first task.
+
+Libraries adopted and where used: `lucide-react` (icons across the shell, dashboard, GitHub, tasks), `@radix-ui/react-dialog` (task/list editor, repository creation review, confirmations, command palette), `@radix-ui/react-select` (task editor list/priority/repository pickers), `@radix-ui/react-dropdown-menu` (row actions), `@radix-ui/react-checkbox` (task completion), `recharts` (token trend area chart and quota utilization bars on History and Overview), `clsx` (variant composition in UI primitives), and `sonner` (save/key/delete toasts). No remote assets, telemetry, or runtime CDNs are used.
+
+The GitHub page now paginates the bounded loaded commit set with explicit loaded-count scope labels and a bounded-not-account-total footnote. The account-wide contribution calendar moved to Overview: Rust fetches the connected account's profile `contributionsCollection.contributionCalendar` through the GitHub GraphQL API (bounded, authenticated, validated, redacted), and Overview renders it with monthly labels, weekday hints, the profile total, an explicit date range, and a note that it includes all contribution types GitHub counts — it is not a local commit total. The per-repository activity grid was removed.
+
+Frontend checks after integration: `npm run typecheck`, `npm run lint`, `npm test` (9 files, 108 tests), and `npm run build` passed. A safe 1200×900 browser-preview capture was inspected; native Windows interaction/DPI smoke checks and a release install remain to be recorded.
+
+## W5b implementation status (verified on branch `feat/workspace-github`)
+
+Implemented and parent-verified (all work under `src/`): additive typed GitHub bindings in `src/lib/desktop.ts`, a `useGitHubConnection` hook with generation-ordered mutation boundaries and friendly error-category copy, an additive `github` view (`GitHubPanel`) with connection banner, repository list, and commit list (repository picker + optional branch, plain-text subjects, author login or unattributed label, local-time commit dates, explicit loaded-count scope labels and a bounded-not-account-total footnote), a Settings → GitHub section (`GitHubSettings`) for the non-secret Client ID plus a masked, one-way-save App Client Secret, connect with in-progress/cancel, and disconnect with confirmation (`ConfirmDialog`), plus a skip-to-content link and additive token-based styles covering reduced-motion/reduced-transparency/forced-colors. `MiniBar`, `src/lib/miniQuota.ts`, and everything under `src-tauri/` are untouched.
+
+Checks actually run by the parent for W5b: `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` — all passed at that phase. Live browser authorization subsequently succeeded. Repository/commit loading against the owner's account, restart restoration, and disconnect cleanup remain outstanding.
+
+**Wire contract note:** the Rust `GitHubConnectionState` enum serializes unit variants verbatim (`Disconnected`/`Authorizing`/`Connected`), so the frontend binds those exact strings; the status struct and summary structs use camelCase fields. Any future `rename_all` change on that enum must be coordinated across both sides. After live verification exposed GitHub's required App secret, the status contract gained only `clientSecretConfigured: boolean`; the secret itself is accepted only by the main-window save command, immediately cleared from the masked field, and never returned.
+
 ## Acceptance checklist for later implementation
 
 - Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states.
@@ -159,4 +177,4 @@ Use real navigation controls with current-page state, a skip-to-content link, vi
 - HUD navigation uses typed, bounded native destinations; no added network work or general write permissions.
 - Extend frontend and native-window contract tests; record the commands and Windows smoke checks actually executed.
 
-No builds, tests, contrast measurements, or Windows smoke checks were run for this documentation proposal.
+The implemented sections above record automated checks actually run. Contrast measurements and native Windows interaction/DPI smoke checks remain outstanding. Only the expanded HUD proposal remains documentation-only in this interface plan.

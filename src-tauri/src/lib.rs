@@ -13,6 +13,7 @@ pub mod providers;
 mod refresh;
 mod settings;
 mod storage;
+pub mod tasks;
 mod tray;
 
 use commands::AppState;
@@ -45,6 +46,11 @@ pub fn run() -> Result<(), AppError> {
         .try_init();
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(|app| {
             let database_path = app
                 .path()
@@ -72,6 +78,12 @@ pub fn run() -> Result<(), AppError> {
                     github_client,
                     github::DEFAULT_API_BASE_URL,
                     Arc::new(credentials::WindowsCredentialStore),
+                    Arc::new(github::connection_store::SqliteGitHubConnectionStore::new(
+                        database_path.clone(),
+                    )),
+                    Arc::new(github::creation_store::SqliteRepositoryCreationStore::new(
+                        database_path.clone(),
+                    )),
                 )),
                 local_api: local_api::LocalApi::new(
                     database_path.clone(),
@@ -79,6 +91,7 @@ pub fn run() -> Result<(), AppError> {
                     std::env::var_os(local_api_token::ENVIRONMENT),
                     api::API_ADDRESS,
                 ),
+                tasks: Arc::new(tasks::TaskService::new(database_path.clone())),
                 close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
@@ -101,7 +114,7 @@ pub fn run() -> Result<(), AppError> {
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 11);
+            tracing::info!(event = "app_started", schema_version = 14);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,11 +132,29 @@ pub fn run() -> Result<(), AppError> {
             commands::delete_provider_key,
             commands::provider_key_status,
             commands::github_connection_status,
-            commands::github_connect_start,
-            commands::github_connect_complete,
+            commands::github_save_client_id,
+            commands::github_save_client_secret,
+            commands::github_sign_in,
+            commands::github_cancel_sign_in,
             commands::github_disconnect,
             commands::github_list_repositories,
-            commands::github_list_commits
+            commands::github_list_commits,
+            commands::github_contribution_calendar,
+            commands::github_prepare_repository_creation,
+            commands::github_confirm_repository_creation,
+            commands::github_repository_creation_status,
+            commands::github_resolve_repository_creation,
+            commands::task_bootstrap,
+            commands::task_list,
+            commands::task_create_list,
+            commands::task_rename_list,
+            commands::task_list_delete_preview,
+            commands::task_delete_list,
+            commands::task_create,
+            commands::task_update,
+            commands::task_set_completed,
+            commands::task_delete,
+            commands::task_set_pinned
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" {

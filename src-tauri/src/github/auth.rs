@@ -10,6 +10,9 @@ use super::{GitHubError, GitHubErrorCategory};
 pub const ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 28_800;
 pub const REFRESH_TOKEN_LIFETIME_SECONDS: u64 = 15_897_600;
 
+const MAX_ACCESS_TOKEN_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
+const MAX_REFRESH_TOKEN_LIFETIME_SECONDS: u64 = 366 * 24 * 60 * 60;
+const MAX_TOKEN_BYTES: usize = 2 * 1024;
 const AUTHORIZE_PATH: &str = "/login/oauth/authorize";
 const TOKEN_PATH: &str = "/login/oauth/access_token";
 const MAX_AUTH_RESPONSE_BYTES: usize = 64 * 1024;
@@ -29,11 +32,11 @@ pub(crate) struct TokenSet {
 
 #[derive(Deserialize)]
 struct RawTokenSet {
-    access_token: String,
-    expires_in: u64,
-    refresh_token: String,
-    refresh_token_expires_in: u64,
-    token_type: String,
+    access_token: Option<String>,
+    expires_in: Option<u64>,
+    refresh_token: Option<String>,
+    refresh_token_expires_in: Option<u64>,
+    token_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -86,11 +89,13 @@ pub(crate) async fn exchange_code(
     client: &Client,
     auth_base_url: &str,
     client_id: &str,
+    client_secret: &str,
     code: &str,
     redirect_uri: &str,
     verifier: &str,
 ) -> Result<TokenSet, GitHubError> {
     validate_client_id(client_id)?;
+    validate_client_secret(client_secret)?;
     validate_authorization_value(code, 1, 512)?;
     validate_authorization_value(verifier, 43, 128)?;
     post_token(
@@ -98,6 +103,7 @@ pub(crate) async fn exchange_code(
         auth_base_url,
         &[
             ("client_id", client_id),
+            ("client_secret", client_secret),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("code_verifier", verifier),
@@ -111,15 +117,18 @@ pub(crate) async fn refresh_token(
     client: &Client,
     auth_base_url: &str,
     client_id: &str,
+    client_secret: &str,
     refresh_token: &str,
 ) -> Result<TokenSet, GitHubError> {
     validate_client_id(client_id)?;
+    validate_client_secret(client_secret)?;
     validate_authorization_value(refresh_token, 1, 512)?;
     post_token(
         client,
         auth_base_url,
         &[
             ("client_id", client_id),
+            ("client_secret", client_secret),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
         ],
@@ -194,7 +203,7 @@ pub(crate) fn parse_token_response(
     }
     if !status.is_success() {
         return Err(match status.as_u16() {
-            401 => GitHubError::authentication_expired(),
+            401 => GitHubError::app_credentials_invalid(),
             403 => GitHubError::permission_denied(),
             429 => GitHubError::rate_limited(),
             500..=599 => GitHubError::provider_unavailable(),
@@ -203,21 +212,51 @@ pub(crate) fn parse_token_response(
     }
 
     let raw: RawTokenSet =
-        serde_json::from_slice(body).map_err(|_| GitHubError::malformed_response())?;
-    if !raw.token_type.eq_ignore_ascii_case("bearer")
-        || !raw.access_token.starts_with("ghu_")
-        || !raw.refresh_token.starts_with("ghr_")
-        || raw.expires_in != ACCESS_TOKEN_LIFETIME_SECONDS
-        || raw.refresh_token_expires_in != REFRESH_TOKEN_LIFETIME_SECONDS
+        serde_json::from_slice(body).map_err(|_| GitHubError::token_response_invalid())?;
+    let has_access_token = raw.access_token.as_deref().is_some_and(valid_opaque_token);
+    let has_bearer_type = raw
+        .token_type
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("bearer"));
+    if has_access_token
+        && has_bearer_type
+        && (raw.expires_in.is_none()
+            || raw.refresh_token.is_none()
+            || raw.refresh_token_expires_in.is_none())
     {
-        return Err(GitHubError::malformed_response());
+        return Err(GitHubError::token_expiration_required());
+    }
+
+    let (Some(access_token), Some(expires_in), Some(refresh_token), Some(refresh_expires_in)) = (
+        raw.access_token,
+        raw.expires_in,
+        raw.refresh_token,
+        raw.refresh_token_expires_in,
+    ) else {
+        return Err(GitHubError::token_response_invalid());
+    };
+    if !has_bearer_type
+        || !valid_opaque_token(&access_token)
+        || !valid_opaque_token(&refresh_token)
+        || expires_in == 0
+        || expires_in > MAX_ACCESS_TOKEN_LIFETIME_SECONDS
+        || refresh_expires_in <= expires_in
+        || refresh_expires_in > MAX_REFRESH_TOKEN_LIFETIME_SECONDS
+    {
+        return Err(GitHubError::token_response_invalid());
     }
     Ok(TokenSet {
-        access_token: raw.access_token,
-        expires_in: raw.expires_in,
-        refresh_token: raw.refresh_token,
-        refresh_token_expires_in: raw.refresh_token_expires_in,
+        access_token,
+        expires_in,
+        refresh_token,
+        refresh_token_expires_in: refresh_expires_in,
     })
+}
+
+fn valid_opaque_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_TOKEN_BYTES
+        && value.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 fn map_oauth_error(error: &str) -> GitHubError {
@@ -226,12 +265,13 @@ fn map_oauth_error(error: &str) -> GitHubError {
             GitHubError::authentication_expired()
         }
         "access_denied" => GitHubError::authorization_denied(),
+        "incorrect_client_credentials" => GitHubError::app_credentials_invalid(),
         "slow_down" => GitHubError::rate_limited(),
         _ => GitHubError::authorization_denied(),
     }
 }
 
-fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
+pub(crate) fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
     if client_id.is_empty()
         || client_id.len() > 128
         || !client_id
@@ -241,6 +281,10 @@ fn validate_client_id(client_id: &str) -> Result<(), GitHubError> {
         return Err(GitHubError::invalid_input());
     }
     Ok(())
+}
+
+pub(crate) fn validate_client_secret(client_secret: &str) -> Result<(), GitHubError> {
+    validate_authorization_value(client_secret, 1, 512)
 }
 
 fn validate_authorization_value(
@@ -373,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_redacted_oauth_errors_and_rejects_unexpected_expiry() {
+    fn parses_redacted_oauth_errors_and_classifies_token_shape_failures() {
         let error = parse_token_response(
             StatusCode::BAD_REQUEST,
             br#"{"error":"bad_refresh_token","error_description":"sensitive provider copy"}"#,
@@ -383,14 +427,58 @@ mod tests {
         assert_eq!(error.category(), GitHubErrorCategory::AuthenticationExpired);
         assert!(!error.to_string().contains("sensitive"));
 
-        let wrong_expiry = SUCCESS.replace("28800", "3600");
+        let invalid_credentials = parse_token_response(
+            StatusCode::UNAUTHORIZED,
+            br#"{"error":"incorrect_client_credentials","error_description":"sensitive provider copy"}"#,
+        )
+        .err()
+        .expect("invalid client credentials");
         assert_eq!(
-            parse_token_response(StatusCode::OK, wrong_expiry.as_bytes())
-                .err()
-                .expect("unexpected expiry")
-                .category(),
-            GitHubErrorCategory::MalformedResponse
+            invalid_credentials.category(),
+            GitHubErrorCategory::AppCredentialsInvalid
         );
+        assert!(!invalid_credentials.to_string().contains("sensitive"));
+
+        let missing_refresh = br#"{
+            "access_token":"opaque_sanitized_access_value",
+            "expires_in":28800,
+            "token_type":"bearer",
+            "scope":""
+        }"#;
+        assert_eq!(
+            parse_token_response(StatusCode::OK, missing_refresh)
+                .err()
+                .expect("non-expiring token response")
+                .category(),
+            GitHubErrorCategory::TokenExpirationRequired
+        );
+
+        let excessive_expiry = SUCCESS.replace("28800", "172800");
+        assert_eq!(
+            parse_token_response(StatusCode::OK, excessive_expiry.as_bytes())
+                .err()
+                .expect("unsupported expiry")
+                .category(),
+            GitHubErrorCategory::TokenResponseInvalid
+        );
+        assert_eq!(
+            parse_token_response(StatusCode::OK, br#"{"unexpected":true}"#)
+                .err()
+                .expect("unsupported response")
+                .category(),
+            GitHubErrorCategory::TokenResponseInvalid
+        );
+    }
+
+    #[test]
+    fn treats_provider_tokens_as_opaque_bounded_values() {
+        let changed_prefixes = SUCCESS
+            .replace("ghu_", "future_access_")
+            .replace("ghr_", "future_refresh_");
+        let token = parse_token_response(StatusCode::OK, changed_prefixes.as_bytes())
+            .expect("opaque provider tokens");
+        assert!(token.access_token.starts_with("future_access_"));
+        assert!(token.refresh_token.starts_with("future_refresh_"));
     }
 
     #[test]

@@ -1,7 +1,24 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type View = "dashboard" | "history" | "settings";
+export type View =
+  | "dashboard"
+  | "ai-usage"
+  | "github"
+  | "todos"
+  | "history"
+  | "settings";
+
+export function isView(value: unknown): value is View {
+  return (
+    value === "dashboard" ||
+    value === "ai-usage" ||
+    value === "github" ||
+    value === "todos" ||
+    value === "history" ||
+    value === "settings"
+  );
+}
 export interface Settings {
   closeToTray: boolean;
   showMascot: boolean;
@@ -164,6 +181,160 @@ export interface LocalApiStatus {
   error: LocalApiFailure | null;
 }
 
+/**
+ * GitHub workspace integration (additive). Wire values match the Rust
+ * `GitHubConnectionState` enum, whose unit variants serialize verbatim
+ * (`"Disconnected"` / `"Authorizing"` / `"Connected"`).
+ */
+export type GitHubConnectionState = "Disconnected" | "Authorizing" | "Connected";
+export interface GitHubAccount {
+  id: number;
+  login: string;
+}
+/** redacted snake_case categories returned by the Rust GitHub service */
+export type GitHubErrorCategory =
+  | "window_denied"
+  | "invalid_input"
+  | "busy"
+  | "authorization_state_mismatch"
+  | "authorization_denied"
+  | "app_credentials_invalid"
+  | "token_expiration_required"
+  | "token_response_invalid"
+  | "account_response_invalid"
+  | "authentication_required"
+  | "authentication_expired"
+  | "rate_limited"
+  | "permission_denied"
+  | "not_found"
+  | "validation_failed"
+  | "network_unavailable"
+  | "provider_unavailable"
+  | "malformed_response"
+  | "credential_store"
+  | "cancelled"
+  | "conflict"
+  | "creation_outcome_unknown";
+export interface GitHubConnectionStatus {
+  state: GitHubConnectionState;
+  account: GitHubAccount | null;
+  lastError: GitHubErrorCategory | null;
+  tokenPresent: boolean;
+  clientIdConfigured: boolean;
+  clientSecretConfigured: boolean;
+}
+export interface GitHubRepositorySummary {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  htmlUrl: string;
+}
+export interface GitHubCommitSummary {
+  sha: string;
+  subject: string;
+  authorId: number | null;
+  authorLogin: string | null;
+  authoredAt: string;
+  committedAt: string;
+}
+export interface GitHubContributionDay {
+  date: string;
+  contributionCount: number;
+  level: 0 | 1 | 2 | 3 | 4;
+  weekday: number;
+}
+export interface GitHubContributionWeek {
+  firstDay: string;
+  days: GitHubContributionDay[];
+}
+export interface GitHubContributionCalendar {
+  totalContributions: number;
+  startedOn: string;
+  endedOn: string;
+  weeks: GitHubContributionWeek[];
+}
+
+export interface RepositoryCreationInput {
+  name: string;
+  description: string | null;
+  private: boolean;
+  initializeReadme: boolean;
+}
+export interface RepositoryCreationReview {
+  reviewId: string;
+  owner: string;
+  name: string;
+  description: string | null;
+  private: boolean;
+  initializeReadme: boolean;
+  expiresAt: string;
+}
+export type RepositoryCreationAttemptState = "outcome_unknown";
+export type RepositoryCreationResolution = "exists" | "not_found";
+export interface RepositoryCreationAttemptStatus {
+  attemptId: string;
+  owner: string;
+  name: string;
+  state: RepositoryCreationAttemptState;
+  repositoryUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Local task workspace (additive, main-window-only Rust commands). */
+export type TaskPriority = "none" | "low" | "medium" | "high";
+export type TaskCompletionFilter = "all" | "open" | "completed";
+export interface TaskRepositoryInput {
+  repositoryId: number;
+  fullName: string;
+}
+export interface TaskRepositoryLink extends TaskRepositoryInput {
+  htmlUrl: string;
+}
+export interface TaskList {
+  id: number;
+  name: string;
+  taskCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskItem {
+  id: number;
+  listId: number;
+  title: string;
+  notes: string | null;
+  priority: TaskPriority;
+  dueDate: string | null;
+  repository: TaskRepositoryLink | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskBootstrap {
+  lists: TaskList[];
+  tasks: TaskItem[];
+  pinnedTaskId: number | null;
+}
+export interface TaskQuery {
+  listId?: number | null;
+  completion?: TaskCompletionFilter;
+  priority?: TaskPriority | null;
+}
+export interface ListDeletePreview {
+  listId: number;
+  taskCount: number;
+}
+/** Redacted snake_case categories returned by the Rust task service. */
+export type TaskErrorCategory =
+  | "window_denied"
+  | "invalid_input"
+  | "not_found"
+  | "conflict"
+  | "count_changed"
+  | "storage";
+
 export const desktop = {
   localApiStatus: () => invoke<LocalApiStatus>("local_api_status"),
   configureLocalApi: (action: LocalApiAction) => invoke<LocalApiStatus>("configure_local_api", { action }),
@@ -193,4 +364,73 @@ export const desktop = {
     invoke<void>("delete_provider_key", { providerId }),
   providerKeyStatus: () =>
     invoke<ProviderKeyStatus[]>("provider_key_status"),
+  githubConnectionStatus: () =>
+    invoke<GitHubConnectionStatus>("github_connection_status"),
+  githubSaveClientId: (clientId: string) =>
+    invoke<GitHubConnectionStatus>("github_save_client_id", { clientId }),
+  githubSaveClientSecret: (clientSecret: string) =>
+    invoke<GitHubConnectionStatus>("github_save_client_secret", {
+      clientSecret,
+    }),
+  githubSignIn: () => invoke<GitHubConnectionStatus>("github_sign_in"),
+  githubCancelSignIn: () =>
+    invoke<GitHubConnectionStatus>("github_cancel_sign_in"),
+  githubDisconnect: () => invoke<GitHubConnectionStatus>("github_disconnect"),
+  githubListRepositories: () =>
+    invoke<GitHubRepositorySummary[]>("github_list_repositories"),
+  githubListCommits: (owner: string, repo: string, branch?: string) =>
+    invoke<GitHubCommitSummary[]>("github_list_commits", {
+      owner,
+      repo,
+      branch: branch || undefined,
+    }),
+  githubContributionCalendar: () =>
+    invoke<GitHubContributionCalendar>("github_contribution_calendar"),
+  githubPrepareRepositoryCreation: (input: RepositoryCreationInput) =>
+    invoke<RepositoryCreationReview>("github_prepare_repository_creation", {
+      input,
+    }),
+  githubConfirmRepositoryCreation: (reviewId: string) =>
+    invoke<GitHubRepositorySummary>("github_confirm_repository_creation", {
+      reviewId,
+    }),
+  githubRepositoryCreationStatus: () =>
+    invoke<RepositoryCreationAttemptStatus[]>(
+      "github_repository_creation_status",
+    ),
+  githubResolveRepositoryCreation: (
+    attemptId: string,
+    resolution: RepositoryCreationResolution,
+  ) =>
+    invoke<void>("github_resolve_repository_creation", {
+      attemptId,
+      resolution,
+    }),
+  taskBootstrap: () => invoke<TaskBootstrap>("task_bootstrap"),
+  taskList: (query: TaskQuery) => invoke<TaskItem[]>("task_list", { query }),
+  taskCreateList: (name: string) =>
+    invoke<TaskList>("task_create_list", { name }),
+  taskRenameList: (listId: number, name: string) =>
+    invoke<TaskList>("task_rename_list", { listId, name }),
+  taskListDeletePreview: (listId: number) =>
+    invoke<ListDeletePreview>("task_list_delete_preview", { listId }),
+  taskDeleteList: (listId: number, expectedTaskCount: number) =>
+    invoke<void>("task_delete_list", { listId, expectedTaskCount }),
+  taskCreate: (input: TaskInput) => invoke<TaskItem>("task_create", { input }),
+  taskUpdate: (taskId: number, input: TaskInput) =>
+    invoke<TaskItem>("task_update", { taskId, input }),
+  taskSetCompleted: (taskId: number, completed: boolean) =>
+    invoke<TaskItem>("task_set_completed", { taskId, completed }),
+  taskDelete: (taskId: number) => invoke<void>("task_delete", { taskId }),
+  taskSetPinned: (taskId: number | null) =>
+    invoke<number | null>("task_set_pinned", { taskId }),
 };
+
+export interface TaskInput {
+  listId: number;
+  title: string;
+  notes: string | null;
+  priority: TaskPriority;
+  dueDate: string | null;
+  repository: TaskRepositoryInput | null;
+}
