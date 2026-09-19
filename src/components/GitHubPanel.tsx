@@ -1,138 +1,136 @@
-import { useEffect, useRef, useState } from "react";
-import { desktop, type GitHubCommitSummary, type GitHubRepositorySummary } from "../lib/desktop";
 import {
-  githubErrorCopyOf,
-  githubErrorText,
-  ownerOf,
-  sameScope,
-  useGitHubConnection,
-  type GitHubScope,
-} from "../lib/github";
-import { ConfirmDialog } from "./ConfirmDialog";
+  BookLock,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FolderPlus,
+  GitCommitHorizontal,
+  Lock,
+  RefreshCw,
+  Unplug,
+  Link2,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  desktop,
+  type GitHubCommitSummary,
+  type GitHubRepositorySummary,
+} from "../lib/desktop";
+import { githubErrorText, type GitHubConnectionApi } from "../lib/github";
+import { formatAge, formatRelativeAge, shortSha } from "../lib/format";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { EmptyState, Spinner } from "./ui/Panel";
+import { Select } from "./ui/Select";
+import { CreationOutcomeBanner } from "./github/CreationOutcomeBanner";
+import { NewRepositoryDialog } from "./github/NewRepositoryDialog";
 
-function formatLocalTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+export interface GitHubPanelProps {
+  native: boolean;
+  connection: GitHubConnectionApi;
+  onOpenSettings: () => void;
+  /** Commands the creation dialog (from the shell "New repository"). */
+  createRequest: number;
+  onConsumeCreateRequest: () => void;
+  onRepositoriesChanged: () => void;
 }
 
-function scopeLabel(scope: GitHubScope): string {
-  if (scope.branch) return `${scope.owner}/${scope.repo} @ ${scope.branch}`;
-  return `${scope.owner}/${scope.repo} · default branch`;
-}
+const COMMITS_PER_PAGE = 10;
 
-export function GitHubPanel({ native }: { native: boolean }) {
-  const connection = useGitHubConnection(native);
-  const { status: connectionStatus, error: connectionError, busy, signInPending } = connection;
-  const [repositories, setRepositories] = useState<GitHubRepositorySummary[] | null>(null);
-  const [repositoriesLoading, setRepositoriesLoading] = useState(false);
+const BRANCH_OPTIONS = [
+  { value: "default", label: "Default branch" },
+  { value: "main", label: "main" },
+  { value: "master", label: "master" },
+];
+
+/**
+ * Polished GitHub workspace page: connection state, repository grid, scoped
+ * commit list, creation flow, and outcome-unknown banner.
+ */
+export function GitHubPanel({
+  native,
+  connection,
+  onOpenSettings,
+  createRequest,
+  onConsumeCreateRequest,
+  onRepositoriesChanged,
+}: GitHubPanelProps) {
+  const [repositories, setRepositories] = useState<GitHubRepositorySummary[]>([]);
+  const [repositoriesLoading, setRepositoriesLoading] = useState(true);
   const [repositoriesError, setRepositoriesError] = useState("");
-  const [repositoriesReload, setRepositoriesReload] = useState(0);
-  const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
-  const [branch, setBranch] = useState("");
-  const [committedBranch, setCommittedBranch] = useState("");
-  const [commits, setCommits] = useState<GitHubCommitSummary[] | null>(null);
-  const [commitsScope, setCommitsScope] = useState<GitHubScope | null>(null);
+  const [selected, setSelected] = useState<GitHubRepositorySummary | null>(null);
+  const [branch, setBranch] = useState<string>("default");
+  const [commits, setCommits] = useState<GitHubCommitSummary[]>([]);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState("");
-  const [commitsReload, setCommitsReload] = useState(0);
-  const [disconnectOpen, setDisconnectOpen] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const lastCommitsScope = useRef<GitHubScope | null>(null);
+  const [commitPage, setCommitPage] = useState(1);
+  const [creationOpen, setCreationOpen] = useState(false);
 
-  const connected = connectionStatus?.state === "Connected";
-  const authorizing = connectionStatus?.state === "Authorizing";
-  const needsAppCredentials =
-    connectionStatus !== null &&
-    (!connectionStatus.clientIdConfigured ||
-      !connectionStatus.clientSecretConfigured);
-  const statusError = connectionStatus?.lastError
-    ? githubErrorCopyOf(connectionStatus.lastError)
-    : "";
-  const visibleError = connectionError || statusError;
-  const selectedRepository =
-    (repositories ?? []).find((repo) => repo.id === selectedRepoId) ?? null;
-  const selectedOwner = selectedRepository ? ownerOf(selectedRepository.fullName) : null;
-  const selectedRepoName = selectedRepository?.name ?? null;
+  const connected = connection.status?.state === "Connected";
+  const [lastCreateRequest, setLastCreateRequest] = useState(0);
 
-  // Drop GitHub content when the connection is not live: a disconnected,
-  // authorizing, or failed connection must never masquerade as zero data.
   useEffect(() => {
-    if (!native || connectionStatus === null) return;
-    if (connectionStatus.state !== "Connected") {
-      setRepositories(null);
-      setRepositoriesError("");
-      setSelectedRepoId(null);
-      setBranch("");
-      setCommittedBranch("");
-      setCommits(null);
-      setCommitsScope(null);
-      setCommitsError("");
-      setCommitsLoading(false);
-      setRepositoriesLoading(false);
-      lastCommitsScope.current = null;
+    if (createRequest !== lastCreateRequest) {
+      setLastCreateRequest(createRequest);
+      if (connected) setCreationOpen(true);
+      onConsumeCreateRequest();
     }
-  }, [native, connectionStatus]);
+  }, [createRequest, lastCreateRequest, onConsumeCreateRequest, connected]);
 
-  useEffect(() => {
-    if (!native || !connected) return;
-    let active = true;
+  function loadRepositories() {
+    if (!native || !connected) {
+      setRepositoriesLoading(false);
+      return;
+    }
     setRepositoriesLoading(true);
     setRepositoriesError("");
     desktop
       .githubListRepositories()
-      .then((value) => {
-        if (active) {
-          setRepositories(value);
-          setSelectedRepoId((current) =>
-            value.some((repo) => repo.id === current) ? current : null,
-          );
-        }
+      .then((rows) => {
+        setRepositories(rows);
+        onRepositoriesChanged();
+        setSelected((current) => {
+          if (current) {
+            const match = rows.find((row) => row.id === current.id);
+            if (match) return match;
+          }
+          return rows[0] ?? null;
+        });
       })
       .catch((reason: unknown) => {
-        if (active) setRepositoriesError(githubErrorText(reason));
+        setRepositoriesError(githubErrorText(reason));
       })
-      .finally(() => {
-        if (active) setRepositoriesLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [native, connected, repositoriesReload]);
+      .finally(() => setRepositoriesLoading(false));
+  }
 
   useEffect(() => {
-    if (!native || !connected || selectedOwner === null || selectedRepoName === null) {
+    loadRepositories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [native, connected]);
+
+  // Re-derive commits when the selection or branch changes.
+  useEffect(() => {
+    setCommitPage(1);
+    if (!native || !connected || !selected) {
+      setCommits([]);
+      setCommitsLoading(false);
+      setCommitsError("");
       return;
     }
     let active = true;
-    const trimmedBranch = committedBranch.trim() || null;
-    const scope: GitHubScope = {
-      owner: selectedOwner,
-      repo: selectedRepoName,
-      branch: trimmedBranch,
-    };
-    if (!sameScope(lastCommitsScope.current, scope)) {
-      lastCommitsScope.current = scope;
-      setCommits(null);
-      setCommitsError("");
-    }
     setCommitsLoading(true);
+    setCommitsError("");
     desktop
-      .githubListCommits(selectedOwner, selectedRepoName, trimmedBranch ?? undefined)
-      .then((value) => {
-        if (active) {
-          setCommits(value);
-          setCommitsScope(scope);
-        }
+      .githubListCommits(
+        selected.fullName.split("/")[0] ?? selected.fullName,
+        selected.name,
+        branch === "default" ? undefined : branch,
+      )
+      .then((rows) => {
+        if (active) setCommits(rows);
       })
       .catch((reason: unknown) => {
-        // A failed reload of the same scope keeps the prior list visible.
         if (active) setCommitsError(githubErrorText(reason));
       })
       .finally(() => {
@@ -141,357 +139,303 @@ export function GitHubPanel({ native }: { native: boolean }) {
     return () => {
       active = false;
     };
-  }, [native, connected, selectedOwner, selectedRepoName, committedBranch, commitsReload]);
+  }, [native, connected, selected, branch]);
 
-  async function handleCancelSignIn() {
-    setCancelling(true);
-    try {
-      await connection.cancelSignIn();
-    } finally {
-      setCancelling(false);
-    }
-  }
+  const connectedAccountId = connection.status?.account?.id ?? null;
+  const attribution = useMemo(() => {
+    const linked = commits.filter(
+      (commit) => connectedAccountId !== null && commit.authorId === connectedAccountId,
+    ).length;
+    return { linked };
+  }, [commits, connectedAccountId]);
+  const commitPageCount = Math.max(1, Math.ceil(commits.length / COMMITS_PER_PAGE));
+  const visibleCommits = commits.slice(
+    (commitPage - 1) * COMMITS_PER_PAGE,
+    commitPage * COMMITS_PER_PAGE,
+  );
 
-  const cancelDisabled = !native || cancelling;
-  const waiting = signInPending || authorizing;
-
-  const coverage =
-    commits === null || commitsScope === null
-      ? null
-      : `${commits.length} loaded commit${commits.length === 1 ? "" : "s"} · ${scopeLabel(commitsScope)}`;
+  const stateLabel = !native
+    ? "Desktop only"
+    : connection.status === null
+      ? "Checking"
+      : connection.status.state === "Connected"
+        ? "Connected"
+        : connection.status.state === "Authorizing"
+          ? "Signing in"
+          : "Not connected";
 
   return (
-    <section className="github" aria-labelledby="github-title">
-      <p className="eyebrow">A gentle look at your work</p>
-      <h1 id="github-title">GitHub</h1>
-      <p className="welcome-copy">
-        Repositories and bounded commit history for the connected account. These
-        are workspace records — never quota or allowance data.
-      </p>
+    <div className="github-page">
+      <div className="github-toolbar">
+        <div className="todo-toolbar-title">
+          <p className="eyebrow">Connected work</p>
+          <h1 className="page-title">GitHub</h1>
+          <p className="page-sub">
+            Track repositories and pushed commits on the connected account.
+          </p>
+        </div>
+        <div className="todo-toolbar-actions">
+          <Button
+            variant="primary"
+            disabled={!native || !connected || connection.busy}
+            onClick={() => setCreationOpen(true)}
+          >
+            <FolderPlus size={15} />
+            New repository
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!native || !connected || connection.busy}
+            onClick={() => void connection.refresh()}
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
+        </div>
+      </div>
 
-      <section
-        className="connection-banner"
-        aria-labelledby="github-connection-heading"
-      >
+      <section className="connection-banner" aria-label="GitHub connection">
         <div className="connection-copy">
-          <h2 id="github-connection-heading" className="visually-hidden">
-            Connection
-          </h2>
-          {!native ? (
-            <>
-              <span className="github-status-badge status-muted">Preview</span>
-              <p>Open the desktop app to connect GitHub.</p>
-            </>
-          ) : waiting ? (
-            <>
-              <span className="github-status-badge status-busy">Waiting</span>
-              <p>
-                Waiting for GitHub… Complete the sign-in in the browser tab that
-                opened. Ellie waits up to 15 minutes.
-              </p>
-            </>
-          ) : connected ? (
-            <>
-              <span className="github-status-badge status-ok">Connected</span>
-              <p>
-                Connected as @{connectionStatus.account?.login ?? "your account"}.
-                {connectionStatus.tokenPresent
-                  ? " Refresh token saved on this device."
-                  : " No saved refresh token yet."}
-              </p>
-            </>
-          ) : (
-            <>
-              <span className="github-status-badge status-muted">
-                Not connected
-              </span>
-              <p>
-                Connect your GitHub account to browse repositories and recent
-                commit history.
-              </p>
-            </>
-          )}
-          {needsAppCredentials && (
-            <p className="github-hint">
-              Add your GitHub App Client ID and Client Secret in Settings → GitHub
-              before connecting.
-            </p>
-          )}
-          {visibleError && (
-            <p className="github-alert" role="alert">
-              {visibleError}
-            </p>
-          )}
+          <Badge tone={connected ? "good" : stateLabel === "Signing in" ? "warning" : "neutral"}>
+            {stateLabel}
+          </Badge>
+          <p>
+            {connected
+              ? `Signed in as @${connection.status?.account?.login ?? "your account"} — read and create access for your personal repositories.`
+              : connection.status?.clientIdConfigured && connection.status.clientSecretConfigured
+                ? "App credentials are ready. Connect your GitHub account to continue."
+                : "Set up the GitHub App credentials in Settings, then connect."}
+          </p>
         </div>
         <div className="connection-actions">
-          {!native ? null : waiting ? (
-            <button type="button" onClick={() => void handleCancelSignIn()} disabled={cancelDisabled}>
-              Cancel sign-in
-            </button>
-          ) : connected ? (
-            <button
-              type="button"
-              onClick={() => setDisconnectOpen(true)}
-              disabled={busy}
-            >
-              Disconnect
-            </button>
+          {connected ? (
+            <>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => void connection.disconnect()}
+                disabled={connection.busy}
+              >
+                <Unplug size={13} />
+                Disconnect
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onOpenSettings}>
+                Manage credentials
+              </Button>
+            </>
           ) : (
-            <button
-              type="button"
-              disabled={busy || needsAppCredentials || connectionStatus === null}
+            <Button
+              size="sm"
+              variant="primary"
               onClick={() => void connection.signIn()}
+              disabled={
+                !native ||
+                connection.busy ||
+                connection.signInPending ||
+                !connection.status?.clientIdConfigured ||
+                !connection.status?.clientSecretConfigured
+              }
             >
-              Connect GitHub account
-            </button>
+              <Link2 size={13} />
+              {connection.signInPending ? "Signing in…" : "Connect GitHub"}
+            </Button>
           )}
         </div>
       </section>
 
-      <div className="section-heading">
-        <h2>Repositories</h2>
-        <span>
-          {repositories === null
-            ? "Scope: connected GitHub account"
-            : `${repositories.length} shown for the connected account`}
-        </span>
-      </div>
-      {!native ? (
-        <p className="github-empty">Open the desktop app to load repositories.</p>
-      ) : !connected ? (
-        <p className="github-empty">
-          Connect your GitHub account to load repositories. Until then there is
-          nothing to show — not an empty account.
+      {connection.error && (
+        <p className="page-alert" role="alert">
+          {connection.error}
         </p>
-      ) : repositoriesLoading && repositories === null ? (
-        <p className="github-empty" role="status">
-          Loading repositories…
-        </p>
-      ) : repositoriesError !== "" && repositories === null ? (
-        <div className="github-failed">
-          <p role="alert">{repositoriesError}</p>
-          <button
-            type="button"
-            onClick={() => setRepositoriesReload((value) => value + 1)}
-          >
-            Reload repositories
-          </button>
-        </div>
-      ) : repositoriesError !== "" && repositories ? (
-        <>
-          <div className="github-failed">
-            <p role="alert">
-              {repositoriesError} Repositories couldn’t be refreshed; showing the
-              previous list.
-            </p>
-            <button
-              type="button"
-              onClick={() => setRepositoriesReload((value) => value + 1)}
-            >
-              Reload repositories
-            </button>
-          </div>
-          <div className="repository-list">
-            {repositories.map((repo) => (
-              <RepositoryCard key={repo.id} repo={repo} />
-            ))}
-          </div>
-        </>
-      ) : repositories && repositories.length === 0 ? (
-        <p className="github-empty">
-          No repositories found for this account. GitHub returned an empty list.
-        </p>
-      ) : repositories ? (
-        <>
-          {repositoriesLoading && (
-            <p className="github-empty" role="status">
-              Refreshing repositories… showing the previous list.
-            </p>
-          )}
-          <div className="repository-list">
-            {repositories.map((repo) => (
-              <RepositoryCard key={repo.id} repo={repo} />
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      <div className="section-heading">
-        <h2>Recent commits</h2>
-        <span>Bounded per-scope history · never an account total</span>
-      </div>
-      {!native ? (
-        <p className="github-empty">Open the desktop app to load commits.</p>
-      ) : !connected ? (
-        <p className="github-empty">
-          Connect a GitHub account, then choose a repository to load commits.
-        </p>
-      ) : (
-        <>
-          <div className="github-controls">
-            <div className="github-field">
-              <label htmlFor="github-repo-picker">Repository</label>
-              <select
-                id="github-repo-picker"
-                disabled={repositories === null || repositories.length === 0}
-                value={selectedRepoId ?? ""}
-                onChange={(event) => {
-                  setSelectedRepoId(Number(event.target.value));
-                  setBranch("");
-                  setCommittedBranch("");
-                  setCommits(null);
-                  setCommitsError("");
-                  lastCommitsScope.current = null;
-                }}
-              >
-                <option value="" disabled>
-                  {repositories === null
-                    ? "Loading repositories…"
-                    : repositories.length === 0
-                      ? "No repositories loaded"
-                      : "Choose a repository"}
-                </option>
-                {(repositories ?? []).map((repo) => (
-                  <option key={repo.id} value={repo.id}>
-                    {repo.fullName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="github-field">
-              <label htmlFor="github-branch-input">Branch (optional)</label>
-              <input
-                id="github-branch-input"
-                type="text"
-                value={branch}
-                placeholder={selectedRepository?.defaultBranch ?? "main"}
-                disabled={!selectedRepository}
-                onChange={(event) => setBranch(event.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              disabled={!selectedRepository}
-              onClick={() => {
-                setCommittedBranch(branch.trim());
-                setCommitsReload((value) => value + 1);
-              }}
-            >
-              Load commits
-            </button>
-          </div>
-          {commitsLoading && commits === null ? (
-            <p className="github-empty" role="status">
-              Loading commits…
-            </p>
-          ) : commitsError !== "" && commits === null ? (
-            <div className="github-failed">
-              <p role="alert">{commitsError}</p>
-              <button
-                type="button"
-                onClick={() => setCommitsReload((value) => value + 1)}
-              >
-                Retry load
-              </button>
-            </div>
-          ) : commits === null ? (
-            <p className="github-empty">
-              Choose a repository above to load its recent commit history.
-            </p>
-          ) : commits.length === 0 ? (
-            <>
-              <p className="coverage-label" role="status">
-                {coverage}
-              </p>
-              <p className="github-empty">
-                0 commits loaded for this scope. GitHub returned a completed
-                empty list for it.
-              </p>
-            </>
-          ) : (
-            <>
-              {commitsLoading && (
-                <p className="github-empty" role="status">
-                  Refreshing… showing the previous list.
-                </p>
-              )}
-              {commitsError !== "" && (
-                <div className="github-failed">
-                  <p role="alert">
-                    {commitsError} Showing previously loaded commits for this
-                    scope.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setCommitsReload((value) => value + 1)}
-                  >
-                    Retry load
-                  </button>
-                </div>
-              )}
-              <p className="coverage-label" role="status">
-                {coverage}
-              </p>
-              <div className="commit-list">
-                {commits.map((commit) => (
-                  <CommitRow key={commit.sha} commit={commit} />
-                ))}
-              </div>
-            </>
-          )}
-          <p className="github-footnote">
-            Loaded commits are a bounded, scoped read from GitHub — never an
-            account-wide or pushed count, and commit times are commit times,
-            not push times.
-          </p>
-        </>
       )}
 
-      <ConfirmDialog
-        open={disconnectOpen}
-        title="Disconnect GitHub?"
-        body="This removes the connected account and the saved refresh token from this device. Local AI usage data is unaffected, and you can reconnect at any time."
-        confirmLabel="Disconnect"
-        cancelLabel="Keep connected"
-        busy={busy}
-        onConfirm={() => {
-          void connection.disconnect().finally(() => setDisconnectOpen(false));
-        }}
-        onCancel={() => setDisconnectOpen(false)}
+      <CreationOutcomeBanner native={native} connected={connected} />
+
+      <div className="github-layout">
+        <section className="panel" aria-label="Repositories">
+          <header className="panel-header">
+            <div className="panel-title">
+              <span className="panel-kicker">Tracked scope</span>
+              <h2 className="panel-heading">Repositories</h2>
+            </div>
+            <span className="panel-count">
+              {!connected
+                ? "—"
+                : repositoriesLoading
+                  ? "loading…"
+                  : `${repositories.length} loaded`}
+            </span>
+          </header>
+          {!native ? (
+            <EmptyState title="Repositories need the desktop app">
+              <p className="empty-state-text">
+                Browser preview does not call GitHub.
+              </p>
+            </EmptyState>
+          ) : !connected ? (
+            <EmptyState icon={<Lock size={17} />} title="Connect to load repositories">
+              <p className="empty-state-text">
+                No repositories are guessed while disconnected.
+              </p>
+            </EmptyState>
+          ) : repositoriesLoading ? (
+            <Spinner label="Loading repositories…" />
+          ) : repositoriesError ? (
+            <EmptyState title="Repositories unavailable" className="empty-state-error">
+              <p className="empty-state-text" role="alert">
+                {repositoriesError}
+              </p>
+            </EmptyState>
+          ) : repositories.length === 0 ? (
+            <EmptyState title="No repositories loaded">
+              <p className="empty-state-text">
+                The connected account returned no repositories in the bounded read.
+              </p>
+            </EmptyState>
+          ) : (
+            <ul className="repo-grid">
+              {repositories.map((repo) => (
+                <li
+                  key={repo.id}
+                  className={
+                    selected?.id === repo.id
+                      ? "repo-card repo-card-active"
+                      : "repo-card"
+                  }
+                >
+                  <button
+                    type="button"
+                    className="repo-card-select"
+                    aria-pressed={selected?.id === repo.id}
+                    onClick={() => setSelected(repo)}
+                  >
+                    <span className="repo-card-icon" aria-hidden="true">
+                      {repo.private ? <BookLock size={15} /> : <BookOpen size={15} />}
+                    </span>
+                    <span className="repo-card-copy">
+                      <strong>{repo.fullName}</strong>
+                      <span className="repo-card-meta">
+                        {repo.private ? "Private" : "Public"} · {repo.defaultBranch}
+                      </span>
+                    </span>
+                  </button>
+                  <a
+                    href={repo.htmlUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open ${repo.fullName} on GitHub`}
+                  >
+                    <ExternalLink size={12} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel" aria-label="Commits">
+          <header className="panel-header">
+            <div className="panel-title">
+              <span className="panel-kicker">Bounded history</span>
+              <h2 className="panel-heading">Commits</h2>
+            </div>
+            <Select
+              label="Branch"
+              value={branch}
+              onValueChange={setBranch}
+              options={BRANCH_OPTIONS}
+              disabled={!connected || !native}
+            />
+          </header>
+          {!connected || !native ? (
+            <EmptyState title="Commits appear after connecting">
+              <p className="empty-state-text">
+                Select a loaded repository to browse its commit history.
+              </p>
+            </EmptyState>
+          ) : commitsLoading ? (
+            <Spinner label="Loading commits…" />
+          ) : commitsError ? (
+            <EmptyState title="Commits unavailable" className="empty-state-error">
+              <p className="empty-state-text" role="alert">
+                {commitsError}
+              </p>
+            </EmptyState>
+          ) : commits.length === 0 ? (
+            <EmptyState icon={<GitCommitHorizontal size={17} />} title="No commits loaded">
+              <p className="empty-state-text">
+                {selected
+                  ? "This scope returned nothing yet — or the repository has no commits."
+                  : "Choose a repository from the list."}
+              </p>
+            </EmptyState>
+          ) : (
+            <>
+              <ul className="commit-list">
+                {visibleCommits.map((commit) => (
+                  <li className="commit-row" key={commit.sha}>
+                    <span className="commit-avatar" aria-hidden="true">
+                      {commit.authorLogin ? commit.authorLogin.slice(0, 1).toUpperCase() : "?"}
+                    </span>
+                    <div className="commit-copy">
+                      <p className="commit-subject">{commit.subject}</p>
+                      <p className="commit-meta">
+                        <code>{shortSha(commit.sha)}</code> ·{" "}
+                        {commit.authorLogin ?? (commit.authorId ? "linked author" : "unattributed")} ·{" "}
+                        committed {formatRelativeAge(commit.committedAt)}
+                        {commit.authoredAt !== commit.committedAt
+                          ? ` · authored ${formatAge(commit.authoredAt)} ago`
+                          : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {commitPageCount > 1 && (
+                <nav className="commit-pagination" aria-label="Commit pages">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={commitPage === 1}
+                    onClick={() => setCommitPage((page) => Math.max(1, page - 1))}
+                  >
+                    <ChevronLeft size={13} /> Previous
+                  </Button>
+                  <span>
+                    Page {commitPage} of {commitPageCount} · {commits.length} loaded
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={commitPage === commitPageCount}
+                    onClick={() =>
+                      setCommitPage((page) => Math.min(commitPageCount, page + 1))
+                    }
+                  >
+                    Next <ChevronRight size={13} />
+                  </Button>
+                </nav>
+              )}
+              <p className="commit-scope">
+                {commits.length} loaded · {selected?.fullName ?? "selected repository"}
+                {branch !== "default" ? ` · ${branch}` : ` · ${selected?.defaultBranch ?? "default branch"}`} · locally
+                counted, not an account-wide total
+              </p>
+              <p className="commit-attribution">
+                {attribution.linked} of {commits.length} commits attributed to{" "}
+                {connection.status?.account?.login ?? "the connected account"} by GitHub.
+              </p>
+            </>
+          )}
+        </section>
+      </div>
+
+      <NewRepositoryDialog
+        open={creationOpen}
+        onOpenChange={setCreationOpen}
+        native={native}
+        refreshRepositories={loadRepositories}
       />
-    </section>
-  );
-}
-
-function RepositoryCard({ repo }: { repo: GitHubRepositorySummary }) {
-  return (
-    <article className="repo-card">
-      <div className="repo-card-main">
-        <h3>{repo.name}</h3>
-        <p>{repo.fullName}</p>
-      </div>
-      <span
-        className={`repo-visibility ${repo.private ? "repo-private" : "repo-public"}`}
-      >
-        {repo.private ? "Private" : "Public"}
-      </span>
-      <span className="repo-detail">Default branch: {repo.defaultBranch}</span>
-      <span className="repo-url">{repo.htmlUrl}</span>
-    </article>
-  );
-}
-
-function CommitRow({ commit }: { commit: GitHubCommitSummary }) {
-  return (
-    <article className="commit-row">
-      <span className="commit-sha">{commit.sha.slice(0, 7)}</span>
-      <div className="commit-main">
-        <strong className="commit-subject">{commit.subject}</strong>
-        <span className="commit-meta">
-          {commit.authorLogin ? `@${commit.authorLogin}` : "Unattributed"} ·{" "}
-          {formatLocalTime(commit.committedAt)}
-        </span>
-      </div>
-    </article>
+    </div>
   );
 }

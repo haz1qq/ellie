@@ -1,4 +1,6 @@
-use chrono::{DateTime, Utc};
+use std::collections::HashSet;
+
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +41,83 @@ pub struct CommitSummary {
     pub committed_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionDay {
+    pub date: NaiveDate,
+    pub contribution_count: u32,
+    pub level: u8,
+    pub weekday: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionWeek {
+    pub first_day: NaiveDate,
+    pub days: Vec<ContributionDay>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionCalendar {
+    pub total_contributions: u32,
+    pub started_on: NaiveDate,
+    pub ended_on: NaiveDate,
+    pub weeks: Vec<ContributionWeek>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCreationInput {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default = "private_by_default")]
+    pub private: bool,
+    #[serde(default)]
+    pub initialize_readme: bool,
+}
+
+fn private_by_default() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCreationReview {
+    pub review_id: String,
+    pub owner: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub private: bool,
+    pub initialize_readme: bool,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryCreationResolution {
+    Exists,
+    NotFound,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryCreationAttemptState {
+    OutcomeUnknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCreationAttemptStatus {
+    pub attempt_id: String,
+    pub owner: String,
+    pub name: String,
+    pub state: RepositoryCreationAttemptState,
+    pub repository_url: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Deserialize)]
 struct RawGitHubUser {
     id: u64,
@@ -74,6 +153,59 @@ struct RawGitSignature {
     date: DateTime<Utc>,
 }
 
+#[derive(Deserialize)]
+struct RawGraphQlResponse {
+    data: Option<RawContributionData>,
+    #[serde(default)]
+    errors: Vec<RawGraphQlError>,
+}
+
+#[derive(Deserialize)]
+struct RawGraphQlError {
+    #[serde(rename = "type")]
+    error_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawContributionData {
+    user: Option<RawContributionUser>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContributionUser {
+    contributions_collection: RawContributionsCollection,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContributionsCollection {
+    contribution_calendar: RawContributionCalendar,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContributionCalendar {
+    total_contributions: u32,
+    weeks: Vec<RawContributionWeek>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContributionWeek {
+    first_day: NaiveDate,
+    contribution_days: Vec<RawContributionDay>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawContributionDay {
+    contribution_count: u32,
+    contribution_level: String,
+    date: NaiveDate,
+    weekday: u8,
+}
+
 pub(crate) fn parse_user(body: &[u8]) -> Result<GitHubAccount, GitHubError> {
     let raw: RawGitHubUser =
         serde_json::from_slice(body).map_err(|_| GitHubError::malformed_response())?;
@@ -86,10 +218,118 @@ pub(crate) fn parse_repositories(body: &[u8]) -> Result<Vec<RepositorySummary>, 
     raw.into_iter().map(sanitize_repository).collect()
 }
 
+pub(crate) fn parse_repository(body: &[u8]) -> Result<RepositorySummary, GitHubError> {
+    let raw: RawRepository =
+        serde_json::from_slice(body).map_err(|_| GitHubError::malformed_response())?;
+    sanitize_repository(raw)
+}
+
 pub(crate) fn parse_commits(body: &[u8]) -> Result<Vec<CommitSummary>, GitHubError> {
     let raw: Vec<RawCommit> =
         serde_json::from_slice(body).map_err(|_| GitHubError::malformed_response())?;
     raw.into_iter().map(sanitize_commit).collect()
+}
+
+pub(crate) fn parse_contribution_calendar(
+    body: &[u8],
+) -> Result<ContributionCalendar, GitHubError> {
+    let raw: RawGraphQlResponse =
+        serde_json::from_slice(body).map_err(|_| GitHubError::malformed_response())?;
+    if !raw.errors.is_empty() {
+        return Err(classify_graphql_errors(&raw.errors));
+    }
+    let calendar = raw
+        .data
+        .and_then(|data| data.user)
+        .ok_or_else(GitHubError::not_found)?
+        .contributions_collection
+        .contribution_calendar;
+    sanitize_contribution_calendar(calendar)
+}
+
+fn classify_graphql_errors(errors: &[RawGraphQlError]) -> GitHubError {
+    let has_type = |expected: &str| {
+        errors.iter().any(|error| {
+            error
+                .error_type
+                .as_deref()
+                .is_some_and(|value| value.eq_ignore_ascii_case(expected))
+        })
+    };
+    if has_type("RATE_LIMITED") {
+        GitHubError::rate_limited()
+    } else if has_type("UNAUTHENTICATED") {
+        GitHubError::authentication_expired()
+    } else if has_type("FORBIDDEN") {
+        GitHubError::permission_denied()
+    } else if has_type("NOT_FOUND") {
+        GitHubError::not_found()
+    } else {
+        GitHubError::provider_unavailable()
+    }
+}
+
+fn sanitize_contribution_calendar(
+    raw: RawContributionCalendar,
+) -> Result<ContributionCalendar, GitHubError> {
+    if raw.weeks.is_empty() || raw.weeks.len() > 54 {
+        return Err(GitHubError::malformed_response());
+    }
+
+    let mut weeks = Vec::with_capacity(raw.weeks.len());
+    let mut seen_dates = HashSet::new();
+    let mut previous_first_day = None;
+    let mut started_on = None;
+    let mut ended_on = None;
+
+    for raw_week in raw.weeks {
+        if raw_week.contribution_days.len() > 7
+            || previous_first_day.is_some_and(|previous| previous >= raw_week.first_day)
+        {
+            return Err(GitHubError::malformed_response());
+        }
+        previous_first_day = Some(raw_week.first_day);
+        let mut days = Vec::with_capacity(raw_week.contribution_days.len());
+        for raw_day in raw_week.contribution_days {
+            if raw_day.weekday > 6
+                || raw_day.date.weekday().num_days_from_sunday() as u8 != raw_day.weekday
+                || raw_day.date < raw_week.first_day
+                || raw_day.date > raw_week.first_day + chrono::Duration::days(6)
+                || !seen_dates.insert(raw_day.date)
+            {
+                return Err(GitHubError::malformed_response());
+            }
+            let level = match raw_day.contribution_level.as_str() {
+                "NONE" => 0,
+                "FIRST_QUARTILE" => 1,
+                "SECOND_QUARTILE" => 2,
+                "THIRD_QUARTILE" => 3,
+                "FOURTH_QUARTILE" => 4,
+                _ => return Err(GitHubError::malformed_response()),
+            };
+            started_on =
+                Some(started_on.map_or(raw_day.date, |date: NaiveDate| date.min(raw_day.date)));
+            ended_on =
+                Some(ended_on.map_or(raw_day.date, |date: NaiveDate| date.max(raw_day.date)));
+            days.push(ContributionDay {
+                date: raw_day.date,
+                contribution_count: raw_day.contribution_count,
+                level,
+                weekday: raw_day.weekday,
+            });
+        }
+        weeks.push(ContributionWeek {
+            first_day: raw_week.first_day,
+            days,
+        });
+    }
+
+    Ok(ContributionCalendar {
+        total_contributions: raw.total_contributions,
+        started_on: started_on.ok_or_else(GitHubError::malformed_response)?,
+        ended_on: ended_on.ok_or_else(GitHubError::malformed_response)?,
+        weeks,
+    })
 }
 
 fn sanitize_user(raw: RawGitHubUser) -> Result<GitHubAccount, GitHubError> {
@@ -212,6 +452,20 @@ pub(crate) fn validate_repository_identifier(value: &str) -> Result<(), GitHubEr
         return Err(GitHubError::invalid_input());
     }
     Ok(())
+}
+
+pub(crate) fn validate_new_repository_name(value: &str) -> Result<String, GitHubError> {
+    validate_repository_identifier(value)?;
+    if value != value.trim()
+        || matches!(value, "." | "..")
+        || value.chars().any(char::is_whitespace)
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(GitHubError::invalid_input());
+    }
+    Ok(value.to_string())
 }
 
 pub(crate) fn validate_branch(value: &str) -> Result<(), GitHubError> {
@@ -344,6 +598,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_profile_contribution_calendar_and_preserves_github_levels() {
+        let calendar = parse_contribution_calendar(
+            br#"{"data":{"user":{"contributionsCollection":{"contributionCalendar":{"totalContributions":3,"weeks":[{"firstDay":"2026-09-06","contributionDays":[{"contributionCount":0,"contributionLevel":"NONE","date":"2026-09-06","weekday":0},{"contributionCount":3,"contributionLevel":"FOURTH_QUARTILE","date":"2026-09-07","weekday":1}]}]}}}}}"#,
+        )
+        .expect("contribution calendar");
+
+        assert_eq!(calendar.total_contributions, 3);
+        assert_eq!(calendar.started_on.to_string(), "2026-09-06");
+        assert_eq!(calendar.ended_on.to_string(), "2026-09-07");
+        assert_eq!(calendar.weeks[0].days[0].level, 0);
+        assert_eq!(calendar.weeks[0].days[1].level, 4);
+    }
+
+    #[test]
+    fn rejects_malformed_or_failed_contribution_calendars() {
+        let invalid_weekday = br#"{"data":{"user":{"contributionsCollection":{"contributionCalendar":{"totalContributions":1,"weeks":[{"firstDay":"2026-09-06","contributionDays":[{"contributionCount":1,"contributionLevel":"FIRST_QUARTILE","date":"2026-09-07","weekday":2}]}]}}}}}"#;
+        assert_eq!(
+            parse_contribution_calendar(invalid_weekday)
+                .expect_err("weekday mismatch")
+                .category(),
+            crate::github::GitHubErrorCategory::MalformedResponse
+        );
+
+        let forbidden =
+            br#"{"data":null,"errors":[{"type":"FORBIDDEN","message":"redacted by parser"}]}"#;
+        assert_eq!(
+            parse_contribution_calendar(forbidden)
+                .expect_err("GraphQL failure")
+                .category(),
+            crate::github::GitHubErrorCategory::PermissionDenied
+        );
+    }
+
+    #[test]
     fn pagination_never_exceeds_page_or_row_bounds() {
         let mut pagination = BoundedPagination::new(2, 3);
         assert_eq!(pagination.current_page(), 1);
@@ -353,6 +641,20 @@ mod tests {
         let second = pagination.accept_page(2, true);
         assert_eq!(second.take_rows, 1);
         assert_eq!(second.next_page, None);
+    }
+
+    #[test]
+    fn repository_creation_input_is_private_by_default_and_names_are_bounded() {
+        let input: RepositoryCreationInput = serde_json::from_value(serde_json::json!({
+            "name": "ellie-workspace"
+        }))
+        .expect("creation input");
+        assert!(input.private);
+        assert!(!input.initialize_readme);
+        assert!(validate_new_repository_name("ellie.workspace-1").is_ok());
+        for invalid in ["", ".", "..", " bad", "bad name", "bad/name", "💥"] {
+            assert!(validate_new_repository_name(invalid).is_err());
+        }
     }
 
     #[test]

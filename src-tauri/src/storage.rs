@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 14;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -20,6 +20,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0010_mini_floating_bar.sql"),
     include_str!("../migrations/0011_local_api.sql"),
     include_str!("../migrations/0012_github_connection.sql"),
+    include_str!("../migrations/0013_workspace_tasks.sql"),
+    include_str!("../migrations/0014_github_repository_creation.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -494,6 +496,84 @@ mod tests {
                 )
                 .is_ok());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn schema_12_upgrade_preserves_existing_data_and_adds_workspace_tables(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        let connection = connect(&path)?;
+        for migration in &MIGRATIONS[..12] {
+            connection.execute_batch(migration)?;
+        }
+        connection.pragma_update(None, "user_version", 12)?;
+        connection.execute(
+            "UPDATE application_settings SET friendly_messages = 0 WHERE id = 1",
+            [],
+        )?;
+        connection.execute(
+            "INSERT INTO providers (provider_key, display_name) VALUES (?1, ?2)",
+            params!["preserved-provider", "Preserved Provider"],
+        )?;
+        connection.execute(
+            "INSERT INTO github_connection
+                (id, client_id, account_id, account_login, updated_at)
+             VALUES (1, ?1, 42, ?2, ?3)",
+            params![
+                "Iv1.sanitized-client",
+                "octo-cat",
+                "2026-01-02T03:04:05.000Z"
+            ],
+        )?;
+        drop(connection);
+
+        let settings = initialize(&path)?;
+        assert!(!settings.friendly_messages);
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT display_name FROM providers WHERE provider_key = ?1",
+                ["preserved-provider"],
+                |row| row.get::<_, String>(0),
+            )?,
+            "Preserved Provider"
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT account_login FROM github_connection WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )?,
+            "octo-cat"
+        );
+        for table in [
+            "task_lists",
+            "tasks",
+            "workspace_task_state",
+            "github_repository_creation_attempts",
+        ] {
+            assert!(connection
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |_| Ok(()),
+                )
+                .is_ok());
+        }
+        assert_eq!(
+            connection.query_row(
+                "SELECT COUNT(*) FROM workspace_task_state WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?,
+            1
+        );
         Ok(())
     }
 

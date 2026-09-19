@@ -23,6 +23,7 @@ pub struct AppState {
     pub database_path: PathBuf,
     pub local_api: Arc<crate::local_api::LocalApi>,
     pub github: Arc<crate::github::GitHubService>,
+    pub tasks: Arc<crate::tasks::TaskService>,
     pub close_to_tray: Arc<AtomicBool>,
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
@@ -291,6 +292,10 @@ fn require_github_main_window(label: &str) -> Result<(), crate::github::GitHubEr
     require_main_window(label).map_err(|_| crate::github::GitHubError::window_denied())
 }
 
+fn require_task_main_window(label: &str) -> Result<(), crate::tasks::TaskError> {
+    require_main_window(label).map_err(|_| crate::tasks::TaskError::window_denied())
+}
+
 #[tauri::command]
 pub async fn github_connection_status(
     window: tauri::WebviewWindow,
@@ -348,28 +353,6 @@ pub async fn github_cancel_sign_in(
 }
 
 #[tauri::command]
-pub async fn github_connect_start(
-    window: tauri::WebviewWindow,
-    app_state: State<'_, AppState>,
-    client_id: String,
-    redirect_port: u16,
-) -> Result<String, crate::github::GitHubError> {
-    require_github_main_window(window.label())?;
-    app_state.github.connect_start(client_id, redirect_port)
-}
-
-#[tauri::command]
-pub async fn github_connect_complete(
-    window: tauri::WebviewWindow,
-    app_state: State<'_, AppState>,
-    code: String,
-    state: String,
-) -> Result<crate::github::GitHubConnectionStatus, crate::github::GitHubError> {
-    require_github_main_window(window.label())?;
-    app_state.github.connect_complete(code, state).await
-}
-
-#[tauri::command]
 pub async fn github_disconnect(
     window: tauri::WebviewWindow,
     app_state: State<'_, AppState>,
@@ -402,15 +385,218 @@ pub async fn github_list_commits(
         .await
 }
 
+#[tauri::command]
+pub async fn github_contribution_calendar(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::github::ContributionCalendar, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.contribution_calendar().await
+}
+
+#[tauri::command]
+pub async fn github_prepare_repository_creation(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    input: crate::github::RepositoryCreationInput,
+) -> Result<crate::github::RepositoryCreationReview, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.prepare_repository_creation(input).await
+}
+
+#[tauri::command]
+pub async fn github_confirm_repository_creation(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    review_id: String,
+) -> Result<crate::github::RepositorySummary, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state
+        .github
+        .confirm_repository_creation(&review_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn github_repository_creation_status(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<crate::github::RepositoryCreationAttemptStatus>, crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state.github.repository_creation_status().await
+}
+
+#[tauri::command]
+pub async fn github_resolve_repository_creation(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    attempt_id: String,
+    resolution: crate::github::RepositoryCreationResolution,
+) -> Result<(), crate::github::GitHubError> {
+    require_github_main_window(window.label())?;
+    app_state
+        .github
+        .resolve_repository_creation(&attempt_id, resolution)
+        .await
+}
+
+#[tauri::command]
+pub async fn task_bootstrap(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::tasks::TaskBootstrap, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.bootstrap())
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_list(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    query: crate::tasks::TaskQuery,
+) -> Result<Vec<crate::tasks::TaskItem>, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.list_tasks(query))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_create_list(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    name: String,
+) -> Result<crate::tasks::TaskList, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.create_list(name))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_rename_list(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    list_id: i64,
+    name: String,
+) -> Result<crate::tasks::TaskList, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.rename_list(list_id, name))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_list_delete_preview(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    list_id: i64,
+) -> Result<crate::tasks::ListDeletePreview, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.list_delete_preview(list_id))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_delete_list(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    list_id: i64,
+    expected_task_count: u64,
+) -> Result<(), crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.delete_list(list_id, expected_task_count))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_create(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    input: crate::tasks::TaskInput,
+) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.create_task(input))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_update(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    task_id: i64,
+    input: crate::tasks::TaskInput,
+) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.update_task(task_id, input))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_set_completed(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    task_id: i64,
+    completed: bool,
+) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.set_completed(task_id, completed))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_delete(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    task_id: i64,
+) -> Result<(), crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.delete_task(task_id))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_set_pinned(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+    task_id: Option<i64>,
+) -> Result<Option<i64>, crate::tasks::TaskError> {
+    require_task_main_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.set_pinned(task_id))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
 #[cfg(test)]
 mod local_api_ipc_tests {
     #[test]
     fn only_main_window_can_manage_authentication() {
         assert!(super::require_main_window("main").is_ok());
         assert!(super::require_github_main_window("main").is_ok());
+        assert!(super::require_task_main_window("main").is_ok());
         for label in ["mini", "", "other"] {
             assert!(super::require_main_window(label).is_err());
             assert!(super::require_github_main_window(label).is_err());
+            assert!(super::require_task_main_window(label).is_err());
         }
     }
 
@@ -427,11 +613,14 @@ mod local_api_ipc_tests {
             "github_save_client_secret",
             "github_sign_in",
             "github_cancel_sign_in",
-            "github_connect_start",
-            "github_connect_complete",
             "github_disconnect",
             "github_list_repositories",
             "github_list_commits",
+            "github_contribution_calendar",
+            "github_prepare_repository_creation",
+            "github_confirm_repository_creation",
+            "github_repository_creation_status",
+            "github_resolve_repository_creation",
         ] {
             let start = commands_source
                 .find(&format!("fn {command}"))
@@ -457,6 +646,45 @@ mod local_api_ipc_tests {
                 main_capability.contains(&format!("\"allow-{permission}\"")),
                 "{command} must be allowed only by the main capability"
             );
+            assert!(!mini_capability.contains(&permission));
+        }
+    }
+
+    #[test]
+    fn every_task_command_uses_the_main_window_guard() {
+        let commands_source = include_str!("commands.rs");
+        let runtime_source = include_str!("lib.rs");
+        let build_manifest = include_str!("../build.rs");
+        let main_capability = include_str!("../capabilities/main.json");
+        let mini_capability = include_str!("../capabilities/mini.json");
+        for command in [
+            "task_bootstrap",
+            "task_list",
+            "task_create_list",
+            "task_rename_list",
+            "task_list_delete_preview",
+            "task_delete_list",
+            "task_create",
+            "task_update",
+            "task_set_completed",
+            "task_delete",
+            "task_set_pinned",
+        ] {
+            let start = commands_source
+                .find(&format!("fn {command}"))
+                .unwrap_or_else(|| panic!("missing command {command}"));
+            let remainder = &commands_source[start..];
+            let end = remainder
+                .find("#[tauri::command]")
+                .unwrap_or(remainder.len());
+            assert!(
+                remainder[..end].contains("require_task_main_window(window.label())?"),
+                "{command} must enforce the main-window guard"
+            );
+            assert!(runtime_source.contains(&format!("commands::{command}")));
+            assert!(build_manifest.contains(&format!("\"{command}\"")));
+            let permission = command.replace('_', "-");
+            assert!(main_capability.contains(&format!("\"allow-{permission}\"")));
             assert!(!mini_capability.contains(&permission));
         }
     }

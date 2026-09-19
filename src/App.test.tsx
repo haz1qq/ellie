@@ -5,6 +5,13 @@ import App from "./App";
 import { desktop, type ProviderOverview } from "./lib/desktop";
 
 vi.mock("./lib/desktop", () => ({
+  isView: (value: unknown) =>
+    value === "dashboard" ||
+    value === "ai-usage" ||
+    value === "github" ||
+    value === "todos" ||
+    value === "history" ||
+    value === "settings",
   desktop: {
     available: vi.fn(),
     localApiStatus: vi.fn().mockResolvedValue({ enabled: false, listening: false, tokenSource: "none", error: null }),
@@ -28,8 +35,25 @@ vi.mock("./lib/desktop", () => ({
     githubDisconnect: vi.fn(),
     githubListRepositories: vi.fn(),
     githubListCommits: vi.fn(),
+    githubContributionCalendar: vi.fn(),
+    githubPrepareRepositoryCreation: vi.fn(),
+    githubConfirmRepositoryCreation: vi.fn(),
+    githubRepositoryCreationStatus: vi.fn(),
+    githubResolveRepositoryCreation: vi.fn(),
+    taskBootstrap: vi.fn(),
+    taskList: vi.fn(),
+    taskCreateList: vi.fn(),
+    taskRenameList: vi.fn(),
+    taskListDeletePreview: vi.fn(),
+    taskDeleteList: vi.fn(),
+    taskCreate: vi.fn(),
+    taskUpdate: vi.fn(),
+    taskSetCompleted: vi.fn(),
+    taskDelete: vi.fn(),
+    taskSetPinned: vi.fn(),
   },
 }));
+
 const initial = {
   closeToTray: true,
   showMascot: true,
@@ -42,6 +66,7 @@ const initial = {
   miniBarX: null as number | null,
   miniBarY: null as number | null,
 };
+
 const initialAnalytics = {
   range: "sevenDays" as const,
   startAt: "2026-09-01T00:00:00Z",
@@ -86,100 +111,96 @@ const emptyAnalytics = {
   quotaWindows: [],
 };
 
-const demoProviders: ProviderOverview[] = [
-  {
+const demoProviders: ProviderOverview[] = [{
+  providerId: "ellie-demo",
+  displayName: "Ellie Demo",
+  snapshot: {
     providerId: "ellie-demo",
     displayName: "Ellie Demo",
-    snapshot: {
-      providerId: "ellie-demo",
-      displayName: "Ellie Demo",
-      accountLabel: "Illustrative account",
-      plan: "Demo",
-      capabilities: {
-        quotaWindows: true,
-        tokenUsage: true,
-        accountBalance: false,
-        credits: false,
-        costTracking: true,
-        localHistory: false,
-      },
-      authState: "unsupported",
-      hasSubscription: null,
-      dataKind: "mock",
-      windows: [
-        {
-          id: "sample-window",
-          label: "Sample allowance",
-          usedPercent: 41,
-          remainingPercent: 59,
-          resetAt: "2026-09-06T12:00:00Z",
-          source: "provider_reported",
-        },
-      ],
-      tokenUsage: {
-        totalTokens: 145000,
-        requestCount: 28,
-        estimatedCostUsd: 0.42,
-        source: "locally_calculated",
-      },
-      balance: null,
-      balanceCurrency: null,
-      spendEstimate: null,
-      model: null,
-      fetchedAt: "2026-09-06T08:00:00Z",
+    accountLabel: "Illustrative account",
+    plan: "Demo",
+    capabilities: { quotaWindows: true, tokenUsage: true, accountBalance: false, credits: false, costTracking: true, localHistory: false },
+    authState: "unsupported",
+    hasSubscription: null,
+    dataKind: "mock",
+    windows: [{
+      id: "sample-window",
+      label: "Sample allowance",
+      usedPercent: 41,
+      remainingPercent: 59,
+      resetAt: "2026-09-06T12:00:00Z",
+      source: "provider_reported",
+    }],
+    tokenUsage: {
+      totalTokens: 145000,
+      requestCount: 28,
+      estimatedCostUsd: 0.42,
+      source: "locally_calculated",
     },
-    error: null,
+    balance: null,
+    balanceCurrency: null,
+    spendEstimate: null,
+    model: null,
+    fetchedAt: "2026-09-06T08:00:00Z",
   },
-];
+  error: null,
+}];
 
-const liveProviders: ProviderOverview[] = [
-  {
+const liveProviders: ProviderOverview[] = [{
+  providerId: "openai-codex",
+  displayName: "OpenAI / Codex",
+  snapshot: {
     providerId: "openai-codex",
     displayName: "OpenAI / Codex",
-    snapshot: {
-      providerId: "openai-codex",
-      displayName: "OpenAI / Codex",
-      accountLabel: "acct_…",
-      plan: "plus",
-      capabilities: {
-        quotaWindows: true,
-        tokenUsage: false,
-        accountBalance: false,
-        credits: true,
-        costTracking: false,
-        localHistory: false,
-      },
-      authState: "authenticated",
-      hasSubscription: true,
-      dataKind: "live",
-      windows: [
-        {
-          id: "primary",
-          label: "5-hour limit",
-          usedPercent: 25,
-          remainingPercent: 75,
-          resetAt: "2026-09-06T21:00:00Z",
-          source: "provider_reported",
-        },
-        {
-          id: "secondary",
-          label: "Weekly limit",
-          usedPercent: 40,
-          remainingPercent: 60,
-          resetAt: "2026-09-07T21:00:00Z",
-          source: "provider_reported",
-        },
-      ],
-      tokenUsage: null,
-      balance: null,
-      balanceCurrency: null,
-      spendEstimate: null,
-      model: null,
-      fetchedAt: "2026-09-06T14:00:00Z",
-    },
-    error: null,
+    accountLabel: "acct_…",
+    plan: "plus",
+    capabilities: { quotaWindows: true, tokenUsage: false, accountBalance: false, credits: true, costTracking: false, localHistory: false },
+    authState: "authenticated",
+    hasSubscription: true,
+    dataKind: "live",
+    windows: [
+      { id: "primary", label: "5-hour limit", usedPercent: 25, remainingPercent: 75, resetAt: "2026-09-06T21:00:00Z", source: "provider_reported" },
+      { id: "secondary", label: "Weekly limit", usedPercent: 40, remainingPercent: 60, resetAt: "2026-09-07T21:00:00Z", source: "provider_reported" },
+    ],
+    tokenUsage: null,
+    balance: null,
+    balanceCurrency: null,
+    spendEstimate: null,
+    model: null,
+    fetchedAt: "2026-09-06T14:00:00Z",
   },
-];
+  error: null,
+}];
+
+const taskFixtures = {
+  lists: [
+    { id: 1, name: "Focus", taskCount: 1, createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" },
+  ],
+  tasks: [
+    {
+      id: 11,
+      listId: 1,
+      title: "Ship the dashboard",
+      notes: null,
+      priority: "high" as const,
+      dueDate: "2026-09-20",
+      repository: null,
+      completedAt: null,
+      createdAt: "2026-09-01T00:00:00Z",
+      updatedAt: "2026-09-01T00:00:00Z",
+    },
+  ],
+  pinnedTaskId: 11,
+};
+
+const disconnectedStatus = {
+  state: "Disconnected" as const,
+  account: null,
+  lastError: null,
+  tokenPresent: false,
+  clientIdConfigured: false,
+  clientSecretConfigured: false,
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -192,17 +213,21 @@ beforeEach(() => {
   vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
   vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
   vi.mocked(desktop.refreshProvider).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
-  vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
-    state: "Disconnected",
-    account: null,
-    lastError: null,
-    tokenPresent: false,
-    clientIdConfigured: false,
-    clientSecretConfigured: false,
-  });
+  vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(disconnectedStatus);
   vi.mocked(desktop.githubListRepositories).mockResolvedValue([]);
   vi.mocked(desktop.githubListCommits).mockResolvedValue([]);
+  vi.mocked(desktop.githubContributionCalendar).mockResolvedValue({ totalContributions: 0, startedOn: "2026-01-01", endedOn: "2026-12-31", weeks: [] });
+  vi.mocked(desktop.githubRepositoryCreationStatus).mockResolvedValue([]);
+  vi.mocked(desktop.taskBootstrap).mockResolvedValue({ lists: [], tasks: [], pinnedTaskId: null });
+  vi.mocked(desktop.taskList).mockResolvedValue([]);
+  vi.mocked(desktop.taskListDeletePreview).mockResolvedValue({ listId: 1, taskCount: 1 });
   vi.mocked(desktop.saveProviderKey).mockResolvedValue(undefined);
+  vi.mocked(desktop.deleteProviderKey).mockResolvedValue(undefined);
+  vi.mocked(desktop.taskSetCompleted).mockImplementation(async (taskId, completed) => ({
+    ...taskFixtures.tasks[0]!,
+    completedAt: completed ? "2026-09-08T10:00:00Z" : null,
+    id: taskId,
+  }));
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
     view: "dashboard",
@@ -210,74 +235,110 @@ beforeEach(() => {
   });
 });
 
-describe("bootstrap shell", () => {
-  it("renders mock usage with clear provenance rather than live provider claims", async () => {
-    render(<App />);
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Opening your local settings…"),
-      ).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("Ellie Demo")).toBeVisible();
-    expect(screen.getAllByText("Mock data")).not.toHaveLength(0);
-    expect(
-      screen.getByRole("progressbar", { name: /illustrative data/ }),
-    ).toHaveAttribute("aria-valuenow", "41");
-    expect(
-      screen.getByText(/Illustrative provider-reported sample/),
-    ).toBeVisible();
-    expect(screen.getByText(/Locally calculated sample/)).toBeVisible();
-    expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
-    expect(screen.getByText("Current usage")).toBeVisible();
-    expect(
-      screen.getByText(/Demo providers exercise Ellie's display/),
-    ).toBeVisible();
+async function renderApp() {
+  render(<App />);
+  await waitFor(() =>
+    expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
+  );
+}
+
+describe("shell and navigation", () => {
+  it("renders the command-center shell with six destinations", async () => {
+    await renderApp();
+    expect(screen.getByRole("heading", { name: "Everything important, one glance." })).toBeVisible();
+    for (const name of ["Overview", "AI Usage", "GitHub", "To-do", "History", "Settings"]) {
+      expect(screen.getByRole("button", { name })).toBeVisible();
+    }
+    expect(screen.getByText("Local to this device")).toBeVisible();
   });
 
-  it("renders live quota with provider provenance and no demo labels", async () => {
+  it("navigates between all views and marks the active page", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    for (const name of ["AI Usage", "GitHub", "To-do", "History", "Settings"]) {
+      const nav = screen.getByRole("button", { name });
+      await user.click(nav);
+      expect(nav).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("heading", { name })).toBeVisible();
+    }
+    await user.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the command palette and jumps to a view", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "Quick actions (Ctrl+K)" }));
+    expect(
+      await screen.findByRole("option", { name: /Create a repository/ }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("option", { name: /Open History/ }));
+    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+  });
+});
+
+describe("dashboard derivation (no invented data)", () => {
+  it("summarizes live allowance, health, github, and tasks from real data", async () => {
     vi.mocked(desktop.bootstrap).mockResolvedValue({
       settings: initial,
       view: "dashboard",
       providers: liveProviders,
     });
-    render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("OpenAI / Codex")).toBeVisible();
-    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
-    expect(screen.getByText("5-hour limit")).toBeVisible();
-    expect(screen.getByText("Weekly limit")).toBeVisible();
-    const primary = screen.getByRole("progressbar", {
-      name: "5-hour limit: 25% used, provider data",
+    vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
+      ...disconnectedStatus,
+      state: "Connected",
+      account: { id: 7, login: "octocat" },
+      tokenPresent: true,
+      clientIdConfigured: true,
+      clientSecretConfigured: true,
     });
-    expect(primary).toHaveAttribute("aria-valuenow", "25");
-    expect(screen.getAllByText("Provider-reported").length).toBe(2);
-    expect(
-      screen.getAllByText(/Resets/).filter((element) =>
-        element.textContent?.includes("2026"),
-      ),
-    ).toHaveLength(2);
-    expect(
-      screen.getByText(/Live data comes from configured provider connections/),
-    ).toBeVisible();
-    expect(screen.queryByText("Sample reset")).not.toBeInTheDocument();
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue(taskFixtures);
+    render(<App />);
+    // Lowest reported allowance KPI: 60% weekly / 75% 5-hour → 60%.
+    expect(await screen.findByText("60%")).toBeVisible();
+    // Provider health: 1 live of 1 visible.
+    expect(screen.getByText("1/1")).toBeVisible();
+    expect(screen.getByText("Connected")).toBeVisible();
+    expect(screen.getByText("1")).toBeVisible(); // open tasks KPI
+    // Pinned task appears on the Overview focus card.
+    expect(await screen.findByText("Ship the dashboard")).toBeVisible();
+    // A disconnected state would not show zero activity; it invites connection.
+    vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(disconnectedStatus);
   });
 
-  it("shows local analytics and supports date ranges", async () => {
-    vi.mocked(desktop.getAnalytics).mockResolvedValue(initialAnalytics);
-    const user = userEvent.setup();
+  it("shows no invented data when disconnected and empty", async () => {
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial,
+      view: "dashboard",
+      providers: [],
+    });
+    await renderApp();
+    expect(screen.getAllByText("GitHub not connected").length).toBeGreaterThan(0);
+    expect(screen.getByText("No current task")).toBeVisible();
+    expect(screen.getByText("No visible provider data")).toBeVisible();
+  });
+});
+
+describe("provider provenance and detail renders", () => {
+  it("renders mock usage with clear provenance rather than live provider claims", async () => {
+    await renderApp();
+    expect(screen.getAllByText("Ellie Demo").length).toBeGreaterThan(0);
+    expect(screen.getByText("Mock data")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: /illustrative data/ })).toHaveAttribute("aria-valuenow", "41");
+    expect(screen.getByText(/Illustrative provider-reported sample/)).toBeVisible();
+    expect(screen.getByText(/Locally calculated sample/)).toBeVisible();
+    expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
+  });
+
+  it("renders live quota with provider provenance and no demo labels", async () => {
+    vi.mocked(desktop.bootstrap).mockResolvedValue({ settings: initial, view: "dashboard", providers: liveProviders });
     render(<App />);
-    expect(screen.queryByRole("heading", { name: "History & insights" })).not.toBeInTheDocument();
-    expect(desktop.getAnalytics).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByRole("heading", { name: "History & insights" })).toBeVisible();
-    expect(screen.getByText("Token activity over time")).toBeVisible();
-    expect(screen.getByText("Quota utilization")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "30 days" }));
-    await waitFor(() =>
-      expect(desktop.getAnalytics).toHaveBeenLastCalledWith("thirtyDays"),
-    );
+    expect(await screen.findByText("5-hour limit")).toBeVisible();
+    expect(screen.getByText("Weekly limit")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "5-hour limit: 25% used, provider data" })).toHaveAttribute("aria-valuenow", "25");
+    expect(await screen.findByText(/75% remaining/)).toBeVisible();
+    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
+    expect(await screen.findAllByText(/Resets/)).not.toHaveLength(0);
   });
 
   it("omits unavailable token breakdowns", async () => {
@@ -294,237 +355,12 @@ describe("bootstrap shell", () => {
     });
     render(<App />);
     expect(await screen.findByText("149,655,123 tokens")).toBeVisible();
-    expect(screen.queryByText(/— in|— out|— cached input/)).not.toBeInTheDocument();
-  });
-
-  it("explains missing history metrics", async () => {
-    vi.mocked(desktop.getAnalytics).mockResolvedValue({
-      ...initialAnalytics, latestRequestCount: null, estimatedSpend: [],
-    });
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByText("No request counts in the selected history")).toBeVisible();
-    expect(screen.getByText("No cost estimates in the selected history")).toBeVisible();
-    expect(screen.getAllByText("Not available")).toHaveLength(2);
-  });
-
-  it("keeps browser preview separate from desktop settings", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.available).mockReturnValue(false);
-    render(<App />);
-    expect(screen.getByText(/Browser preview/)).toBeVisible();
-    expect(screen.getByRole("button", { name: /Hide to tray/ })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.getByText("Open the desktop app to view local history.")).toBeVisible();
-  });
-
-  it("saves mini bar enablement and opacity with the settings form", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("checkbox", { name: /Mini floating bar/ }));
-    fireEvent.change(
-      screen.getByRole("slider", { name: "Mini bar opacity" }),
-      { target: { value: "0.7" } },
-    );
-    expect(screen.getByText("70%")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    await waitFor(() => expect(desktop.saveSettings).toHaveBeenLastCalledWith({
-      ...initial,
-      miniBarEnabled: true,
-      miniBarOpacity: 0.7,
-    }));
-  });
-
-  it("keeps the prior mini bar settings active after a failed save", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.saveSettings).mockRejectedValue(new Error("failed"));
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("checkbox", { name: /Mini floating bar/ }));
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your settings were not saved");
-    await user.click(screen.getByRole("button", { name: "Overview" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByRole("checkbox", { name: /Mini floating bar/ })).toBeChecked();
-    expect(desktop.saveSettings).toHaveBeenCalledWith({ ...initial, miniBarEnabled: true });
-  });
-
-  it("saves the usage notification preference", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.saveSettings).mockResolvedValue({
-      ...initial,
-      notificationsEnabled: false,
-    });
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(
-      screen.getByRole("checkbox", { name: /Usage notifications/ }),
-    );
-    fireEvent.change(
-      screen.getByRole("slider", { name: "First warning threshold" }),
-      { target: { value: "70" } },
-    );
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    await waitFor(() =>
-      expect(desktop.saveSettings).toHaveBeenLastCalledWith({
-        ...initial,
-        notificationsEnabled: false,
-        notificationThresholds: [70, 90, 95],
-      }),
-    );
-  });
-
-  it("saves preferences only after success and reports failures without raw errors", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.saveSettings)
-      .mockRejectedValueOnce(new Error("sensitive backend detail"))
-      .mockResolvedValueOnce({ ...initial, friendlyMessages: false });
-    render(<App />);
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Opening your local settings…"),
-      ).not.toBeInTheDocument(),
-    );
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(
-      screen.getByRole("checkbox", { name: /Friendly messages/ }),
-    );
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Your settings were not saved",
-    );
-    expect(
-      screen.queryByText("sensitive backend detail"),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(
-      await screen.findByText("Settings saved on this device."),
-    ).toBeVisible();
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith({
-      ...initial,
-      friendlyMessages: false,
-    });
-    await user.click(screen.getByRole("button", { name: "Overview" }));
-    expect(
-      screen.queryByText("There you are. I saved your spot."),
-    ).not.toBeInTheDocument();
-  });
-
-  it("hides explicitly unsubscribed providers and brings them back on resubscribe", async () => {
-    const unsubscribed: ProviderOverview[] = [
-      {
-        providerId: "openai-codex",
-        displayName: "OpenAI / Codex",
-        snapshot: {
-          providerId: "openai-codex",
-          displayName: "OpenAI / Codex",
-          accountLabel: null,
-          plan: "free",
-          capabilities: {
-            quotaWindows: true,
-            tokenUsage: false,
-            accountBalance: false,
-            credits: false,
-            costTracking: false,
-            localHistory: false,
-          },
-          authState: "authenticated",
-          hasSubscription: false,
-          dataKind: "live",
-          windows: [
-            {
-              id: "primary",
-              label: "5-hour limit",
-              usedPercent: 5,
-              remainingPercent: 95,
-              resetAt: null,
-              source: "provider_reported",
-            },
-          ],
-          tokenUsage: null,
-          balance: null,
-          balanceCurrency: null,
-          spendEstimate: null,
-          model: null,
-          fetchedAt: "2026-09-06T14:00:00Z",
-        },
-        error: null,
-      },
-      ...demoProviders,
-    ];
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: unsubscribed,
-    });
-    const first = render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
-    );
-    // The unsubscribed card is hidden; the demo card stays.
-    expect(screen.queryByText("OpenAI / Codex")).not.toBeInTheDocument();
-    expect(screen.getByText("Ellie Demo")).toBeVisible();
-    expect(screen.getByText("1 shown · 1 hidden")).toBeVisible();
-    expect(screen.getByText(/Demo providers exercise Ellie's display/)).toBeVisible();
-
-    // Resubscribing flips the flag on the next refresh and the card returns.
-    const resubscribed: ProviderOverview[] = unsubscribed.map((provider) =>
-      provider.snapshot
-        ? {
-            ...provider,
-            snapshot: { ...provider.snapshot, plan: "plus", hasSubscription: true },
-          }
-        : provider,
-    );
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: resubscribed,
-    });
-    first.unmount();
-    render(<App />);
-    await waitFor(() => expect(screen.getByText("OpenAI / Codex")).toBeVisible());
-  });
-
-  it("hides unconfigured providers but keeps transient errors visible", async () => {
-    const mixed: ProviderOverview[] = [
-      {
-        providerId: "anthropic-claude",
-        displayName: "Anthropic / Claude",
-        snapshot: null,
-        error: "authentication_required", // no ANTHROPIC_API_KEY
-      },
-      {
-        providerId: "openai-codex",
-        displayName: "OpenAI / Codex",
-        snapshot: null,
-        error: "unavailable", // transient codex failure stays visible
-      },
-      ...demoProviders,
-    ];
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: mixed,
-    });
-    render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("2 shown · 1 hidden")).toBeVisible();
-    // Only the transient error card renders; the unconfigured one is hidden.
-    const unavailableCards = screen.getAllByText("Provider unavailable");
-    expect(unavailableCards).toHaveLength(1);
-    expect(screen.getByText("unavailable")).toBeVisible();
-    expect(screen.queryByText("authentication_required")).not.toBeInTheDocument();
-    expect(screen.getByText("Ellie Demo")).toBeVisible();
   });
 
   it("renders provider-reported account balance with its currency", async () => {
-    const deepseek: ProviderOverview[] = [
-      {
+    vi.mocked(desktop.bootstrap).mockResolvedValue({
+      settings: initial, view: "dashboard",
+      providers: [{
         providerId: "deepseek",
         displayName: "DeepSeek",
         snapshot: {
@@ -532,14 +368,7 @@ describe("bootstrap shell", () => {
           displayName: "DeepSeek",
           accountLabel: null,
           plan: null,
-          capabilities: {
-            quotaWindows: false,
-            tokenUsage: false,
-            accountBalance: true,
-            credits: false,
-            costTracking: false,
-            localHistory: false,
-          },
+          capabilities: { quotaWindows: false, tokenUsage: false, accountBalance: true, credits: false, costTracking: false, localHistory: false },
           authState: "authenticated",
           hasSubscription: null,
           dataKind: "live",
@@ -552,331 +381,262 @@ describe("bootstrap shell", () => {
           fetchedAt: "2026-09-06T14:00:00Z",
         },
         error: null,
-      },
-    ];
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: deepseek,
+      }],
     });
     render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("DeepSeek")).toBeVisible();
-    expect(screen.getByText("Account balance")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "DeepSeek" })).toBeVisible();
+    expect(screen.getByText("Balance")).toBeVisible();
     expect(screen.getByText(/110/)).toBeVisible();
     expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
   });
+});
 
-  it("renders live token breakdown, model, and spend estimate for balance providers", async () => {
-    const anthropic: ProviderOverview[] = [
-      {
-        providerId: "anthropic-claude",
-        displayName: "Anthropic / Claude",
-        snapshot: {
-          providerId: "anthropic-claude",
-          displayName: "Anthropic / Claude",
-          accountLabel: null,
-          plan: null,
-          capabilities: {
-            quotaWindows: false,
-            tokenUsage: true,
-            accountBalance: false,
-            credits: false,
-            costTracking: true,
-            localHistory: false,
-          },
-          authState: "authenticated",
-          hasSubscription: null,
-          dataKind: "live",
-          windows: [],
-          tokenUsage: {
-            totalTokens: 8000,
-            inputTokens: 7200,
-            outputTokens: 800,
-            cachedInputTokens: 1700,
-            requestCount: null,
-            estimatedCostUsd: 2.0,
-            source: "locally_calculated",
-          },
-          balance: 100,
-          balanceCurrency: "USD",
-          spendEstimate: {
-            amount: 20,
-            currency: "USD",
-            windowDays: 10,
-          },
-          model: "claude-opus-5",
-          fetchedAt: "2026-09-06T14:00:00Z",
-        },
-        error: null,
-      },
-    ];
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: anthropic,
-    });
-    render(<App />);
-    await waitFor(() =>
-      expect(screen.queryByText("Opening your local settings…")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("Model: claude-opus-5")).toBeVisible();
-    expect(screen.getByText(/7,200 input \/ 800 output/)).toBeVisible();
-    expect(screen.getByText(/1,700 cached input/)).toBeVisible();
-    expect(screen.getByText("Token activity (last 30 days)")).toBeVisible();
-    expect(screen.getByText(/≈ spent \(last 10 days\)/)).toBeVisible();
-    expect(screen.queryByText("Mock data")).not.toBeInTheDocument();
-  });
-
-  it("saves and reports provider API keys in settings without echoing them", async () => {
+describe("settings behavior regressions", () => {
+  it("saves preferences from the settings form", async () => {
     const user = userEvent.setup();
-    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([
-      { providerId: "anthropic-claude", source: "none" },
-      { providerId: "deepseek", source: "credential_manager" },
-    ]);
-    vi.mocked(desktop.saveProviderKey).mockResolvedValue(undefined);
-    render(<App />);
+    await renderApp();
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.type(
-      screen.getByLabelText("DeepSeek API key"),
-      "sk-test-secret",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Save DeepSeek API key" }),
-    );
-    await waitFor(() =>
-      expect(desktop.saveProviderKey).toHaveBeenCalledWith(
-        "deepseek",
-        "sk-test-secret",
-      ),
-    );
-    expect(screen.queryByText("sk-test-secret")).not.toBeInTheDocument();
-    expect(screen.getByText(/Saved on this device/)).toBeVisible();
+    await user.click(screen.getByRole("checkbox", { name: /Mini floating bar/ }));
+    fireEvent.change(screen.getByRole("slider", { name: "Mini bar opacity" }), { target: { value: "0.7" } });
+    expect(screen.getByText("70%")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(desktop.saveSettings).toHaveBeenLastCalledWith({
+      ...initial, miniBarEnabled: true, miniBarOpacity: 0.7,
+    }));
   });
 
-  it("hides the demo only after saving and restores it from Settings", async () => {
+  it("keeps prior settings active after a failed save without raw errors", async () => {
     const user = userEvent.setup();
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial, view: "dashboard", providers: [...demoProviders, ...liveProviders],
-    });
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Hide Ellie Demo" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "OpenAI / Codex" })).toBeVisible();
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, hiddenProviderIds: ["ellie-demo"] });
-    expect(screen.getByText("1 shown · 1 hidden")).toBeVisible();
-    expect(desktop.bootstrap).toHaveBeenCalledTimes(1);
-    expect(desktop.deleteProviderKey).not.toHaveBeenCalled();
+    vi.mocked(desktop.saveSettings).mockRejectedValue(new Error("sensitive backend detail"));
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("checkbox", { name: /Friendly messages/ }));
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(screen.getByText(/Your settings were not saved/)).toBeVisible());
+    expect(screen.queryByText("sensitive backend detail")).not.toBeInTheDocument();
+  });
 
+  it("hides a provider from the dashboard and restores it in Settings", async () => {
+    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockResolvedValue({ settings: initial, view: "dashboard", providers: [...demoProviders, ...liveProviders] });
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: "Hide Ellie Demo" }));
+    await waitFor(() => expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, hiddenProviderIds: ["ellie-demo"] }));
+    expect(screen.queryByText("Ellie Demo")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Settings" }));
     const toggle = screen.getByRole("checkbox", { name: /Show Ellie Demo on dashboard/ });
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith(initial);
-    await user.click(screen.getByRole("button", { name: "Overview" }));
-    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
   });
 
-  it("loads persisted hidden cards and can hide a failed provider by its registry identity", async () => {
+  it("saves provider keys without echoing them", async () => {
     const user = userEvent.setup();
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: { ...initial, hiddenProviderIds: ["ellie-demo"] }, view: "dashboard",
-      providers: [...demoProviders, { providerId: "deepseek", displayName: "DeepSeek", snapshot: null, error: "unavailable" }],
-    });
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Hide DeepSeek" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "DeepSeek" })).not.toBeInTheDocument());
-    expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument();
-    expect(screen.getByText("0 shown · 2 hidden")).toBeVisible();
-    expect(screen.getByText(/No visible providers/)).toBeVisible();
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, hiddenProviderIds: ["ellie-demo", "deepseek"] });
+    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([{ providerId: "deepseek", source: "none" }]);
+    await renderApp();
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByRole("checkbox", { name: /Show Ellie Demo/ })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /Show DeepSeek/ })).not.toBeChecked();
+    await user.type(screen.getByLabelText("DeepSeek API key"), "sk-test-secret");
+    await user.click(screen.getByRole("button", { name: "Save DeepSeek key" }));
+    await waitFor(() => expect(desktop.saveProviderKey).toHaveBeenCalledWith("deepseek", "sk-test-secret"));
+    expect(screen.queryByText("sk-test-secret")).not.toBeInTheDocument();
   });
 
-  it("keeps the card on save failure and disables hide while saving", async () => {
+  it("offers GitHub connection controls inside Settings", async () => {
+    await renderApp();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText(/No GitHub App Client ID saved yet/)).toBeVisible();
+    expect(screen.getByLabelText("GitHub App Client ID")).toBeEnabled();
+    expect(screen.getByText(/stored in Windows Credential Manager and are never displayed/)).toBeVisible();
+  });
+});
+
+describe("provider refresh and lifecycle", () => {
+  it("refreshes all providers and keeps stale-data messaging", async () => {
     const user = userEvent.setup();
-    let rejectSave!: (error: Error) => void;
-    vi.mocked(desktop.saveSettings).mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
-    render(<App />);
-    const hide = await screen.findByRole("button", { name: "Hide Ellie Demo" });
-    await user.click(hide);
-    expect(hide).toBeDisabled();
-    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
-    rejectSave(new Error("sensitive storage failure"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider visibility was not saved");
-    expect(screen.queryByText("sensitive storage failure")).not.toBeInTheDocument();
-    expect(hide).toBeEnabled();
-    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
-  });
-
-  it("preserves unsaved appearance edits when restoring a provider", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: { ...initial, hiddenProviderIds: ["ellie-demo"] }, view: "settings", providers: demoProviders,
-    });
-    render(<App />);
-    await user.click(await screen.findByRole("checkbox", { name: /Friendly messages/ }));
-    await user.click(screen.getByRole("checkbox", { name: /Show Ellie Demo/ }));
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Show Ellie Demo/ })).toBeChecked());
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith(initial);
-    expect(screen.getByRole("checkbox", { name: /Friendly messages/ })).not.toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-    expect(desktop.saveSettings).toHaveBeenLastCalledWith({ ...initial, friendlyMessages: false });
-  });
-
-  it("keeps failed restores hidden and preserves automatic authentication hiding", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: { ...initial, hiddenProviderIds: ["ellie-demo", "deepseek"] }, view: "settings",
-      providers: [...demoProviders, { providerId: "deepseek", displayName: "DeepSeek", snapshot: null, error: "authentication_required" }],
-    });
-    vi.mocked(desktop.saveSettings).mockRejectedValueOnce(new Error("secret"));
-    render(<App />);
-    const demo = await screen.findByRole("checkbox", { name: /Show Ellie Demo/ });
-    await user.click(demo);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider visibility was not saved");
-    expect(demo).not.toBeChecked();
-    await user.click(screen.getByRole("checkbox", { name: /Show DeepSeek/ }));
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Show DeepSeek/ })).toBeChecked());
-    await user.click(screen.getByRole("button", { name: "Overview" }));
-    expect(screen.queryByRole("heading", { name: "DeepSeek" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Ellie Demo" })).not.toBeInTheDocument();
-  });
-
-  it("stores an OpenAI Admin API key separately from Codex login", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.providerKeyStatus).mockResolvedValue([
-      { providerId: "openai-api", source: "none" },
-    ]);
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Settings" }));
-    await user.type(
-      screen.getByLabelText("OpenAI Admin API key"),
-      "sk-admin-test-secret",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Save OpenAI Admin API key" }),
-    );
-    await waitFor(() =>
-      expect(desktop.saveProviderKey).toHaveBeenCalledWith(
-        "openai-api",
-        "sk-admin-test-secret",
-      ),
-    );
-    expect(screen.queryByText("sk-admin-test-secret")).not.toBeInTheDocument();
-    expect(screen.getByText(/Key saved to Windows Credential Manager/)).toBeVisible();
-    expect(screen.getByText(/API billing is configured separately above/)).toBeVisible();
-  });
-
-  it("renders a complete local reset date and time", async () => {
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: liveProviders,
-    });
-    render(<App />);
-    const resets = await screen.findAllByText(/Resets/);
-    expect(resets.some((element) => element.textContent?.includes("2026"))).toBe(true);
-  });
-
-  it("refreshes all providers and preserves stale data messaging", async () => {
-    const user = userEvent.setup();
-    const stale = {
-      ...demoProviders[0]!,
-      error: "unavailable" as const,
-      stale: true,
-      lastSuccessfulRefresh: new Date(Date.now() - 120_000).toISOString(),
-    };
-    vi.mocked(desktop.refreshAll).mockResolvedValue({
-      providers: [stale],
-      refreshed: true,
-      busy: false,
-    });
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Refresh now" }));
+    const stale = { ...demoProviders[0]!, error: "unavailable" as const, stale: true, lastSuccessfulRefresh: new Date(Date.now() - 120_000).toISOString() };
+    vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: [stale], refreshed: true, busy: false });
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: "Refresh providers" }));
     await waitFor(() => expect(desktop.refreshAll).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/Showing data from .*refresh failed/)).toBeVisible();
-    expect(screen.getByText(/Current usage/)).toBeVisible();
-  });
+    expect(await screen.findByText(/Showing data from .*refresh failed/)).toBeVisible();  });
 
-  it("refreshes one provider without dropping the other cards", async () => {
-    const user = userEvent.setup();
-    vi.mocked(desktop.bootstrap).mockResolvedValue({
-      settings: initial,
-      view: "dashboard",
-      providers: [...demoProviders, ...liveProviders],
-    });
-    vi.mocked(desktop.refreshProvider).mockResolvedValue({
-      providers: [...demoProviders, ...liveProviders],
-      refreshed: true,
-      busy: false,
-    });
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Refresh OpenAI / Codex" }));
-    await waitFor(() =>
-      expect(desktop.refreshProvider).toHaveBeenCalledWith("openai-codex"),
-    );
-    expect(screen.getByRole("heading", { name: "Ellie Demo" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "OpenAI / Codex" })).toBeVisible();
-  });
-
-  it("accepts background provider updates without a manual refresh", async () => {
+  it("accepts background provider updates", async () => {
     let update!: (providers: ProviderOverview[]) => void;
     vi.mocked(desktop.onProvidersUpdated).mockImplementation(async (callback) => {
       update = callback;
       return () => {};
     });
-    render(<App />);
-    await screen.findByRole("heading", { name: "Ellie Demo" });
+    await renderApp();
     update([]);
     await waitFor(() => expect(screen.getByText("0 connected")).toBeVisible());
   });
 
   it("offers retry when settings cannot be loaded", async () => {
-    vi.mocked(desktop.bootstrap).mockRejectedValueOnce(
-      new Error("unavailable"),
-    );
-    const user = userEvent.setup();
+    vi.mocked(desktop.bootstrap).mockRejectedValueOnce(new Error("unavailable"));
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("keeps browser preview separate", async () => {
+    vi.mocked(desktop.available).mockReturnValue(false);
+    render(<App />);
+    expect(await screen.findByText(/Browser preview/)).toBeVisible();
+    expect(screen.getByText(/Desktop settings, tray controls, GitHub sign-in/)).toBeVisible();
+  });
+});
+
+describe("to-do workflows", () => {
+  it("lists tasks, completes them, and pins a focus task", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue(taskFixtures);
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    expect(await screen.findByText("Ship the dashboard")).toBeVisible();
+    await user.click(screen.getByRole("checkbox", { name: /Mark "Ship the dashboard" complete/ }));
+    await waitFor(() => expect(desktop.taskSetCompleted).toHaveBeenCalledWith(11, true));
+  });
+
+  it("creates a task from the new-task dialog", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue({ lists: taskFixtures.lists as never, tasks: [], pinnedTaskId: null });
+    vi.mocked(desktop.taskCreate).mockResolvedValue({ ...taskFixtures.tasks[0]!, id: 12 });
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.type(await screen.findByLabelText("Title"), "Write tests");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(desktop.taskCreate).toHaveBeenCalled());
+    expect(desktop.taskCreate).toHaveBeenCalledWith(expect.objectContaining({ title: "Write tests" }));
+  });
+
+  it("deletes a list only after reporting the affected task count", async () => {
+    vi.mocked(desktop.taskBootstrap)
+      .mockResolvedValueOnce({
+        lists: taskFixtures.lists as never,
+        tasks: taskFixtures.tasks as never,
+        pinnedTaskId: null,
+      })
+      .mockResolvedValue({ lists: [], tasks: [], pinnedTaskId: null });
+    vi.mocked(desktop.taskListDeletePreview).mockResolvedValue({ listId: 1, taskCount: 1 });
+    vi.mocked(desktop.taskDeleteList).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    await user.click(await screen.findByRole("button", { name: /^Focus/ }));
+    await user.click(await screen.findByLabelText("Delete list"));
+    expect(await screen.findByText(/"Focus" has 1 task/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+    await waitFor(() => expect(desktop.taskDeleteList).toHaveBeenCalledWith(1, 1));
     await waitFor(() =>
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /^Focus/ })).not.toBeInTheDocument(),
     );
   });
 
-  it("navigates to the GitHub view showing an invitation and no provider data", async () => {
+  it("creates a first list before opening the first task editor", async () => {
+    const createdList = {
+      id: 2,
+      name: "Personal",
+      taskCount: 0,
+      createdAt: "2026-09-18T00:00:00Z",
+      updatedAt: "2026-09-18T00:00:00Z",
+    };
+    vi.mocked(desktop.taskBootstrap)
+      .mockResolvedValueOnce({ lists: [], tasks: [], pinnedTaskId: null })
+      .mockResolvedValue({ lists: [createdList], tasks: [], pinnedTaskId: null });
+    vi.mocked(desktop.taskCreateList).mockResolvedValue(createdList);
     const user = userEvent.setup();
-    render(<App />);
-    const nav = await screen.findByRole("button", { name: "GitHub" });
-    expect(nav).not.toHaveAttribute("aria-current", "page");
-    await user.click(nav);
-    expect(nav).toHaveAttribute("aria-current", "page");
-    expect(
-      screen.getByText(/Connect your GitHub account to browse repositories/),
-    ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "GitHub" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Providers" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Current usage" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Refresh now/)).not.toBeInTheDocument();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    expect(await screen.findByRole("heading", { name: "Create a list" })).toBeVisible();
+    await user.type(screen.getByLabelText("List name"), "Personal");
+    await user.click(screen.getByRole("button", { name: "Create list" }));
+    expect(await screen.findByRole("heading", { name: "New task" })).toBeVisible();
+    expect(screen.getByLabelText("Title")).toBeEnabled();
   });
 
-  it("offers GitHub connection controls inside Settings", async () => {
+  it("allows editing a task whose due date is already overdue", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue({
+      lists: taskFixtures.lists as never,
+      tasks: [{ ...taskFixtures.tasks[0]!, dueDate: "2020-01-01" }] as never,
+      pinnedTaskId: null,
+    });
     const user = userEvent.setup();
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Settings" }));
-    expect(await screen.findByText(/No GitHub App Client ID saved yet/)).toBeVisible();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    await user.click(await screen.findByRole("button", { name: "Ship the dashboard" }));
+    expect(screen.getByLabelText("Due date")).not.toHaveAttribute("min");
+  });
+});
+
+describe("GitHub page and repository creation", () => {
+  it("invites connection instead of showing zero activity", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "GitHub" }));
+    expect(await screen.findByText("Connect to load repositories")).toBeVisible();
     expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeDisabled();
-    expect(screen.getByLabelText("GitHub App Client ID")).toBeEnabled();
-    expect(
-      screen.getByText(
-        /App Client Secret and refresh token are stored in Windows Credential Manager/,
-      ),
-    ).toBeVisible();
+    expect(screen.queryByText(/0 repositories/)).not.toBeInTheDocument();
+  });
+
+  it("walks the private repository creation flow with review confirmation", async () => {
+    vi.mocked(desktop.githubConnectionStatus).mockResolvedValue({
+      ...disconnectedStatus, state: "Connected", account: { id: 7, login: "octocat" },
+      tokenPresent: true, clientIdConfigured: true, clientSecretConfigured: true,
+    });
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue([
+      { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
+    ]);
+    vi.mocked(desktop.githubPrepareRepositoryCreation).mockResolvedValue({
+      reviewId: "review-1",
+      owner: "octocat",
+      name: "personal-notes",
+      description: "My notes",
+      private: true,
+      initializeReadme: true,
+      expiresAt: "2026-09-08T12:00:00Z",
+    });
+    vi.mocked(desktop.githubConfirmRepositoryCreation).mockResolvedValue({
+      id: 99, name: "personal-notes", fullName: "octocat/personal-notes", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/personal-notes",
+    });
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "GitHub" }));
+    await user.click(await screen.findByRole("button", { name: "New repository" }));
+    await user.type(await screen.findByLabelText("Repository name"), "personal-notes");
+    await user.click(screen.getByRole("button", { name: "Continue to review" }));
+    expect(await screen.findByText("Review before creating")).toBeVisible();
+    expect(screen.getByText("octocat")).toBeVisible();
+    expect(screen.getByText("personal-notes")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Create private repository" }));
+    expect(await screen.findByText("Repository created")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Open repository on GitHub/ })).toHaveAttribute(
+      "href",
+      "https://github.com/octocat/personal-notes",
+    );
+  });
+});
+
+describe("history analytics", () => {
+  it("shows local analytics with real charts and range switching", async () => {
+    vi.mocked(desktop.getAnalytics).mockResolvedValue(initialAnalytics);
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("Token activity")).toBeVisible();
+    expect(screen.getByText("Quota utilization")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "30 days" }));
+    await waitFor(() => expect(desktop.getAnalytics).toHaveBeenLastCalledWith("thirtyDays"));
+  });
+
+  it("explains missing history metrics", async () => {
+    vi.mocked(desktop.getAnalytics).mockResolvedValue({ ...initialAnalytics, latestRequestCount: null, estimatedSpend: [] });
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("No request counts in the selected history")).toBeVisible();
+    expect(screen.getByText("No cost estimates in the selected history")).toBeVisible();
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
   });
 });

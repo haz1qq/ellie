@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Local main window may read usage analytics, manage preferences, hide to tray, save/remove provider keys, open GitHub authorization in the default browser, and read credential source status; stored secrets are never returned.",
+  "description": "Local main window may read usage analytics, manage preferences and local tasks, hide to tray, save/remove provider keys, authorize GitHub, read repositories/commits, and confirm personal repository creation; stored secrets are never returned.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -26,10 +26,24 @@
     "allow-github-save-client-secret",
     "allow-github-sign-in",
     "allow-github-cancel-sign-in",
-    "allow-github-connect-start",
-    "allow-github-connect-complete",
     "allow-github-disconnect",
     "allow-github-list-repositories",
-    "allow-github-list-commits"
+    "allow-github-list-commits",
+    "allow-github-contribution-calendar",
+    "allow-github-prepare-repository-creation",
+    "allow-github-confirm-repository-creation",
+    "allow-github-repository-creation-status",
+    "allow-github-resolve-repository-creation",
+    "allow-task-bootstrap",
+    "allow-task-list",
+    "allow-task-create-list",
+    "allow-task-rename-list",
+    "allow-task-list-delete-preview",
+    "allow-task-delete-list",
+    "allow-task-create",
+    "allow-task-update",
+    "allow-task-set-completed",
+    "allow-task-delete",
+    "allow-task-set-pinned"
   ]
 }

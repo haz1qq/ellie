@@ -2,14 +2,14 @@
 
 ## Status and approved scope
 
-**Documentation only. No feature implementation or release is claimed.** The owner selected:
+**Implementation active on `feat/workspace-github`.** W1–W5 are implemented in the working tree; W6 (expanded HUD) remains pending. The owner selected:
 
 - GitHub **track + create**: view authorized public/private repositories, track pushed commits, and create repositories.
 - **Local to-do lists**: private tasks with completion, priority, due dates, and optional repository links; no issue synchronization.
 - **Expand the existing floating bar**: quota, commit activity, and a current task in an optional compact HUD that opens dashboard details.
 - Preserve existing token/quota monitoring and improve the detailed dashboard.
 
-The interaction details and technical choices below are proposals for review, not additional approved implementation work. Each delivery phase requires separate authorization. No GitHub credentials are needed to review this document.
+The owner subsequently authorized the full workspace phase. The implementation preserves the scope limits below; live repository creation still requires separate explicit confirmation in the app and has not been performed during automated testing.
 
 ## Design documents
 
@@ -191,16 +191,16 @@ HUD receives only the configured summary through narrow read/navigation permissi
 
 ## 6. Delivery plan and acceptance gates
 
-All phases below are **planned, not started**. Deliver one authorized vertical slice at a time; retain existing milestone history.
+W1–W5 are implemented on `feat/workspace-github`; W6 remains planned. Retain existing milestone history and do not treat automated fixtures as live GitHub verification.
 
 | Phase | Deliverable | Gate |
 | --- | --- | --- |
 | W1 | Verify GitHub auth/API feasibility and finalize permission design | Official-source evidence; read/create permissions, secure desktop flow and registration decision documented; owner approval before implementation |
 | W2 | GitHub connection, selection, commit list and cached read states | Authorized live public/private checks plus sanitized fixture tests; partial coverage, identity attribution, expiry, rate limits and disconnect verified |
-| W3 | Personal repository creation | Explicit review/confirmation; real authorized test repository created only with owner consent; duplicate submission and ambiguous outcome tests |
-| W4 | Local lists/tasks and persistence | Offline CRUD, restart persistence, failed saves, date boundaries, pin clearing, and populated-database migration tests |
-| W5 | Integrated Overview and detailed navigation | Existing AI/history/settings behavior preserved; accessible loading/empty/error states and narrow layouts verified |
-| W6 | Expand existing HUD | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, DPI/multi-monitor dragging and clean quit verified |
+| W3 | Personal repository creation — implemented, live create pending | Explicit review/confirmation; duplicate submission and ambiguous outcome tests pass; real authorized repository creation requires owner consent |
+| W4 | Local lists/tasks and persistence — implemented | Offline CRUD, restart persistence, failed saves, date boundaries, pin clearing, populated migration, and repository-link retention tests pass |
+| W5 | Integrated Overview and detailed navigation — implemented | Existing AI/history/settings behavior preserved; six-view library-backed shell, scoped commit pagination, account-wide profile contribution calendar, and accessible states implemented |
+| W6 | Expand existing HUD — pending | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, DPI/multi-monitor dragging and clean quit verified |
 
 Dashboard sketches and review can precede implementation phases. Each implemented phase must include usable main-window UI rather than accumulating backend-only work until W5.
 

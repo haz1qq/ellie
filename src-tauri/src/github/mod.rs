@@ -1,9 +1,11 @@
 pub mod auth;
 pub mod connection_store;
+pub mod creation_store;
 pub mod models;
 mod sign_in;
 
 use std::{
+    collections::HashMap,
     fmt,
     future::Future,
     sync::{
@@ -13,7 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::{
     header::{self, HeaderMap},
     Client, StatusCode, Url,
@@ -23,11 +26,17 @@ use serde::{Deserialize, Serialize};
 use crate::credentials::SecretStore;
 use auth::TokenSet;
 use connection_store::{GitHubConnectionStore, StoredConnection};
+use creation_store::{RepositoryCreationStore, StoredCreationAttempt, StoredCreationState};
 use models::{
-    parse_commits, parse_repositories, parse_user, validate_branch, validate_repository_identifier,
+    parse_commits, parse_contribution_calendar, parse_repositories, parse_repository, parse_user,
+    validate_branch, validate_new_repository_name, validate_repository_identifier,
     BoundedPagination,
 };
-pub use models::{CommitSummary, GitHubAccount, RepositorySummary};
+pub use models::{
+    CommitSummary, ContributionCalendar, ContributionDay, ContributionWeek, GitHubAccount,
+    RepositoryCreationAttemptState, RepositoryCreationAttemptStatus, RepositoryCreationInput,
+    RepositoryCreationResolution, RepositoryCreationReview, RepositorySummary,
+};
 
 pub const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
 pub const DEFAULT_AUTH_BASE_URL: &str = "https://github.com";
@@ -35,6 +44,26 @@ pub const REFRESH_TOKEN_ACCOUNT: &str = "github_refresh_token";
 pub const CLIENT_SECRET_ACCOUNT: &str = "github_app_client_secret";
 
 const API_VERSION: &str = "2022-11-28";
+const CONTRIBUTION_CALENDAR_QUERY: &str = r#"
+query EllieContributionCalendar($login: String!) {
+  user(login: $login) {
+    contributionsCollection {
+      contributionCalendar {
+        totalContributions
+        weeks {
+          firstDay
+          contributionDays {
+            contributionCount
+            contributionLevel
+            date
+            weekday
+          }
+        }
+      }
+    }
+  }
+}
+"#;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_API_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_PAGE_SIZE: usize = 100;
@@ -43,6 +72,9 @@ const DEFAULT_MAX_ROWS: usize = 500;
 const ACCESS_TOKEN_EXPIRY_MARGIN: Duration = Duration::from_secs(30);
 pub(crate) const AUTHORIZATION_LIFETIME: Duration = Duration::from_secs(15 * 60);
 const LOOPBACK_BIND_ATTEMPTS: usize = 3;
+const REPOSITORY_REVIEW_LIFETIME: Duration = Duration::from_secs(10 * 60);
+const MAX_REPOSITORY_DESCRIPTION_CHARS: usize = 350;
+const REVIEW_ID_RANDOM_BYTES: usize = 24;
 
 const STATE_DISCONNECTED: u8 = 0;
 const STATE_AUTHORIZING: u8 = 1;
@@ -66,6 +98,8 @@ pub enum GitHubErrorCategory {
     PermissionDenied,
     NotFound,
     ValidationFailed,
+    Conflict,
+    CreationOutcomeUnknown,
     NetworkUnavailable,
     ProviderUnavailable,
     MalformedResponse,
@@ -136,12 +170,20 @@ impl GitHubError {
         Self::new(GitHubErrorCategory::PermissionDenied)
     }
 
-    const fn not_found() -> Self {
+    pub(crate) const fn not_found() -> Self {
         Self::new(GitHubErrorCategory::NotFound)
     }
 
     const fn validation_failed() -> Self {
         Self::new(GitHubErrorCategory::ValidationFailed)
+    }
+
+    const fn conflict() -> Self {
+        Self::new(GitHubErrorCategory::Conflict)
+    }
+
+    const fn creation_outcome_unknown() -> Self {
+        Self::new(GitHubErrorCategory::CreationOutcomeUnknown)
     }
 
     pub(crate) const fn network_unavailable() -> Self {
@@ -193,6 +235,10 @@ impl fmt::Display for GitHubError {
             GitHubErrorCategory::PermissionDenied => "GitHub denied permission for the request",
             GitHubErrorCategory::NotFound => "the requested GitHub resource was not found",
             GitHubErrorCategory::ValidationFailed => "GitHub rejected the request",
+            GitHubErrorCategory::Conflict => "a repository with that name already exists",
+            GitHubErrorCategory::CreationOutcomeUnknown => {
+                "the repository creation outcome is unknown"
+            }
             GitHubErrorCategory::NetworkUnavailable => "GitHub is not reachable",
             GitHubErrorCategory::ProviderUnavailable => "GitHub is temporarily unavailable",
             GitHubErrorCategory::MalformedResponse => "GitHub returned an unexpected response",
@@ -249,6 +295,14 @@ struct AccessSession {
     generation: u64,
 }
 
+#[derive(Clone)]
+struct PendingRepositoryReview {
+    review: RepositoryCreationReview,
+    account: GitHubAccount,
+    generation: u64,
+    expires_at: Instant,
+}
+
 #[derive(Clone, Copy)]
 struct ServiceLimits {
     page_size: usize,
@@ -272,6 +326,7 @@ pub struct GitHubService {
     auth_base_url: String,
     secret_store: Arc<dyn SecretStore>,
     connection_store: Arc<dyn GitHubConnectionStore>,
+    creation_store: Arc<dyn RepositoryCreationStore>,
     connection_state: AtomicU8,
     generation: AtomicU64,
     connection: Mutex<ConnectionRecord>,
@@ -281,6 +336,9 @@ pub struct GitHubService {
     authorization_now: Arc<dyn Fn() -> Instant + Send + Sync>,
     authorization_lifetime: Duration,
     authorization_changed: tokio::sync::Notify,
+    repository_reviews: Mutex<HashMap<String, PendingRepositoryReview>>,
+    repository_creation_gate: tokio::sync::Mutex<()>,
+    request_timeout: Duration,
     limits: ServiceLimits,
 }
 
@@ -290,6 +348,7 @@ impl GitHubService {
         api_base_url: impl Into<String>,
         secret_store: Arc<dyn SecretStore>,
         connection_store: Arc<dyn GitHubConnectionStore>,
+        creation_store: Arc<dyn RepositoryCreationStore>,
     ) -> Self {
         Self::with_auth_base(
             client,
@@ -297,6 +356,7 @@ impl GitHubService {
             DEFAULT_AUTH_BASE_URL,
             secret_store,
             connection_store,
+            creation_store,
         )
     }
 
@@ -306,6 +366,7 @@ impl GitHubService {
         auth_base_url: impl Into<String>,
         secret_store: Arc<dyn SecretStore>,
         connection_store: Arc<dyn GitHubConnectionStore>,
+        creation_store: Arc<dyn RepositoryCreationStore>,
     ) -> Self {
         Self {
             client,
@@ -313,6 +374,7 @@ impl GitHubService {
             auth_base_url: auth_base_url.into().trim_end_matches('/').to_string(),
             secret_store,
             connection_store,
+            creation_store,
             connection_state: AtomicU8::new(STATE_DISCONNECTED),
             generation: AtomicU64::new(0),
             connection: Mutex::new(ConnectionRecord::default()),
@@ -322,6 +384,9 @@ impl GitHubService {
             authorization_now: Arc::new(Instant::now),
             authorization_lifetime: AUTHORIZATION_LIFETIME,
             authorization_changed: tokio::sync::Notify::new(),
+            repository_reviews: Mutex::new(HashMap::new()),
+            repository_creation_gate: tokio::sync::Mutex::new(()),
+            request_timeout: REQUEST_TIMEOUT,
             limits: ServiceLimits::default(),
         }
     }
@@ -819,6 +884,9 @@ impl GitHubService {
         if let Ok(mut pending) = self.pending.lock() {
             *pending = None;
         }
+        if let Ok(mut reviews) = self.repository_reviews.lock() {
+            reviews.clear();
+        }
         *self.access_session.lock().await = None;
         if let Ok(mut connection) = self.connection.lock() {
             *connection = ConnectionRecord::default();
@@ -925,6 +993,321 @@ impl GitHubService {
         Ok(output)
     }
 
+    pub async fn contribution_calendar(&self) -> Result<ContributionCalendar, GitHubError> {
+        let result = self.contribution_calendar_inner().await;
+        self.record_result(&result);
+        result
+    }
+
+    async fn contribution_calendar_inner(&self) -> Result<ContributionCalendar, GitHubError> {
+        self.restore_if_needed().await?;
+        let login = self
+            .connection
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .account
+            .as_ref()
+            .map(|account| account.login.clone())
+            .ok_or_else(GitHubError::authentication_required)?;
+        let url = self.api_url("/graphql")?;
+        let payload = GraphQlRequest {
+            query: CONTRIBUTION_CALENDAR_QUERY,
+            variables: GraphQlVariables { login: &login },
+        };
+        let response = self.authorized_post_json(url, &payload).await?;
+        parse_contribution_calendar(&response.body)
+    }
+
+    pub async fn prepare_repository_creation(
+        &self,
+        input: RepositoryCreationInput,
+    ) -> Result<RepositoryCreationReview, GitHubError> {
+        self.restore_if_needed().await?;
+        if self.state() != GitHubConnectionState::Connected {
+            return Err(GitHubError::authentication_required());
+        }
+        let input = validate_repository_creation_input(input)?;
+        let generation = self.generation.load(Ordering::SeqCst);
+        let account = self
+            .connection
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .account
+            .clone()
+            .ok_or_else(GitHubError::authentication_required)?;
+        let review_id = generate_review_id()?;
+        let expires_at_instant = (self.authorization_now)()
+            .checked_add(REPOSITORY_REVIEW_LIFETIME)
+            .ok_or_else(GitHubError::provider_unavailable)?;
+        let review = RepositoryCreationReview {
+            review_id: review_id.clone(),
+            owner: account.login.clone(),
+            name: input.name,
+            description: input.description,
+            private: input.private,
+            initialize_readme: input.initialize_readme,
+            expires_at: Utc::now()
+                + ChronoDuration::from_std(REPOSITORY_REVIEW_LIFETIME)
+                    .map_err(|_| GitHubError::provider_unavailable())?,
+        };
+        let mut reviews = self
+            .repository_reviews
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?;
+        let now = (self.authorization_now)();
+        reviews.retain(|_, pending| pending.expires_at > now);
+        reviews.insert(
+            review_id,
+            PendingRepositoryReview {
+                review: review.clone(),
+                account,
+                generation,
+                expires_at: expires_at_instant,
+            },
+        );
+        Ok(review)
+    }
+
+    pub async fn confirm_repository_creation(
+        &self,
+        review_id: &str,
+    ) -> Result<RepositorySummary, GitHubError> {
+        creation_store::validate_attempt_id(review_id)?;
+        let _gate = self
+            .repository_creation_gate
+            .try_lock()
+            .map_err(|_| GitHubError::busy())?;
+        let pending = self.take_repository_review(review_id)?;
+        let now = Utc::now();
+        let attempt = StoredCreationAttempt {
+            id: review_id.to_string(),
+            account: pending.account.clone(),
+            repository_name: pending.review.name.clone(),
+            state: StoredCreationState::Dispatching,
+            created_at: now,
+            updated_at: now,
+        };
+        self.begin_creation_attempt(attempt).await?;
+
+        let result = self.send_repository_creation(&pending).await;
+        match result {
+            Ok(repository) => {
+                // The remote side effect is already confirmed. A local cleanup
+                // failure must never turn this into a retryable creation error.
+                if self.remove_creation_attempt(review_id).await.is_err() {
+                    tracing::warn!(event = "github_repository_creation_cleanup_failed");
+                }
+                self.record_result(&Ok::<(), GitHubError>(()));
+                Ok(repository)
+            }
+            Err(error) if error.category() == GitHubErrorCategory::CreationOutcomeUnknown => {
+                if self
+                    .mark_creation_outcome_unknown(review_id, Utc::now())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(event = "github_repository_creation_uncertainty_save_failed");
+                }
+                self.record_error(error.category());
+                Err(error)
+            }
+            Err(error) => {
+                self.remove_creation_attempt(review_id).await?;
+                if error.category() == GitHubErrorCategory::AuthenticationExpired {
+                    self.mark_authentication_expired().await;
+                } else {
+                    self.record_error(error.category());
+                }
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn repository_creation_status(
+        &self,
+    ) -> Result<Vec<RepositoryCreationAttemptStatus>, GitHubError> {
+        let attempts = self.load_creation_attempts().await?;
+        Ok(attempts
+            .into_iter()
+            .map(|attempt| RepositoryCreationAttemptStatus {
+                attempt_id: attempt.id,
+                owner: attempt.account.login.clone(),
+                name: attempt.repository_name.clone(),
+                state: RepositoryCreationAttemptState::OutcomeUnknown,
+                repository_url: format!(
+                    "https://github.com/{}/{}",
+                    attempt.account.login, attempt.repository_name
+                ),
+                created_at: attempt.created_at,
+                updated_at: attempt.updated_at,
+            })
+            .collect())
+    }
+
+    pub async fn resolve_repository_creation(
+        &self,
+        attempt_id: &str,
+        resolution: RepositoryCreationResolution,
+    ) -> Result<(), GitHubError> {
+        creation_store::validate_attempt_id(attempt_id)?;
+        self.restore_if_needed().await?;
+        if self.state() != GitHubConnectionState::Connected {
+            return Err(GitHubError::authentication_required());
+        }
+        let account = self
+            .connection
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .account
+            .clone()
+            .ok_or_else(GitHubError::authentication_required)?;
+        let attempts = self.load_creation_attempts().await?;
+        let attempt = attempts
+            .into_iter()
+            .find(|attempt| attempt.id == attempt_id)
+            .ok_or_else(GitHubError::not_found)?;
+        if attempt.account.id != account.id {
+            return Err(GitHubError::permission_denied());
+        }
+        self.remove_creation_attempt(attempt_id).await?;
+        let outcome = match resolution {
+            RepositoryCreationResolution::Exists => "exists",
+            RepositoryCreationResolution::NotFound => "not_found",
+        };
+        tracing::info!(
+            event = "github_repository_creation_resolved",
+            resolution = outcome
+        );
+        Ok(())
+    }
+
+    fn take_repository_review(
+        &self,
+        review_id: &str,
+    ) -> Result<PendingRepositoryReview, GitHubError> {
+        let pending = self
+            .repository_reviews
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .remove(review_id)
+            .ok_or_else(GitHubError::invalid_input)?;
+        if pending.expires_at <= (self.authorization_now)() {
+            return Err(GitHubError::invalid_input());
+        }
+        self.ensure_generation(pending.generation)?;
+        if self.state() != GitHubConnectionState::Connected {
+            return Err(GitHubError::authentication_required());
+        }
+        let account = self
+            .connection
+            .lock()
+            .map_err(|_| GitHubError::provider_unavailable())?
+            .account
+            .clone()
+            .ok_or_else(GitHubError::authentication_required)?;
+        if account != pending.account {
+            return Err(GitHubError::cancelled());
+        }
+        Ok(pending)
+    }
+
+    async fn send_repository_creation(
+        &self,
+        pending: &PendingRepositoryReview,
+    ) -> Result<RepositorySummary, GitHubError> {
+        self.ensure_generation(pending.generation)?;
+        let access_token = self.access_token(false, pending.generation).await?;
+        self.ensure_generation(pending.generation)?;
+        let url = self.api_url("/user/repos")?;
+        let payload = CreateRepositoryRequest {
+            name: &pending.review.name,
+            description: pending.review.description.as_deref(),
+            private: pending.review.private,
+            auto_init: pending.review.initialize_readme,
+        };
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(access_token)
+            .header(header::ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .json(&payload)
+            .timeout(self.request_timeout)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_connect() {
+                    GitHubError::network_unavailable()
+                } else {
+                    GitHubError::creation_outcome_unknown()
+                }
+            })?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        if status != StatusCode::CREATED {
+            let body = read_bounded(response, MAX_API_RESPONSE_BYTES)
+                .await
+                .unwrap_or_default();
+            if status.is_success() {
+                return Err(GitHubError::creation_outcome_unknown());
+            }
+            if status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::CONFLICT {
+                return Err(GitHubError::conflict());
+            }
+            return Err(classify_api_error(status, &headers, &body));
+        }
+        let body = read_bounded(response, MAX_API_RESPONSE_BYTES)
+            .await
+            .map_err(|_| GitHubError::creation_outcome_unknown())?;
+        let repository =
+            parse_repository(&body).map_err(|_| GitHubError::creation_outcome_unknown())?;
+        let expected_full_name = format!("{}/{}", pending.account.login, pending.review.name);
+        if repository.name != pending.review.name || repository.full_name != expected_full_name {
+            return Err(GitHubError::creation_outcome_unknown());
+        }
+        if self.ensure_generation(pending.generation).is_err() {
+            return Err(GitHubError::creation_outcome_unknown());
+        }
+        Ok(repository)
+    }
+
+    async fn begin_creation_attempt(
+        &self,
+        attempt: StoredCreationAttempt,
+    ) -> Result<(), GitHubError> {
+        let store = Arc::clone(&self.creation_store);
+        tokio::task::spawn_blocking(move || store.begin(&attempt))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
+    async fn mark_creation_outcome_unknown(
+        &self,
+        id: &str,
+        updated_at: chrono::DateTime<Utc>,
+    ) -> Result<(), GitHubError> {
+        let id = id.to_string();
+        let store = Arc::clone(&self.creation_store);
+        tokio::task::spawn_blocking(move || store.mark_outcome_unknown(&id, updated_at))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
+    async fn remove_creation_attempt(&self, id: &str) -> Result<(), GitHubError> {
+        let id = id.to_string();
+        let store = Arc::clone(&self.creation_store);
+        tokio::task::spawn_blocking(move || store.remove(&id))
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
+    async fn load_creation_attempts(&self) -> Result<Vec<StoredCreationAttempt>, GitHubError> {
+        let store = Arc::clone(&self.creation_store);
+        tokio::task::spawn_blocking(move || store.list_unresolved())
+            .await
+            .map_err(|_| GitHubError::credential_store())?
+    }
+
     async fn get_user_with_access_token(
         &self,
         access_token: &str,
@@ -961,6 +1344,51 @@ impl GitHubService {
                 }
             };
             response = self.send_api_get(url, &refreshed_token).await?;
+        }
+        self.ensure_generation(generation)?;
+        if let Err(error) = ensure_api_success(&response) {
+            if error.category() == GitHubErrorCategory::AuthenticationExpired {
+                self.mark_authentication_expired().await;
+            }
+            return Err(error);
+        }
+        Ok(response)
+    }
+
+    async fn authorized_post_json<T: Serialize + ?Sized>(
+        &self,
+        url: Url,
+        payload: &T,
+    ) -> Result<ApiResponse, GitHubError> {
+        if self.state() != GitHubConnectionState::Connected {
+            return Err(GitHubError::authentication_required());
+        }
+        let generation = self.generation.load(Ordering::SeqCst);
+        let access_token = match self.access_token(false, generation).await {
+            Ok(token) => token,
+            Err(error) => {
+                if is_authentication_failure(error.category()) {
+                    self.mark_authentication_expired().await;
+                }
+                return Err(error);
+            }
+        };
+        let mut response = self
+            .send_api_post_json(url.clone(), &access_token, payload)
+            .await?;
+        if response.status == StatusCode::UNAUTHORIZED {
+            let refreshed_token = match self.access_token(true, generation).await {
+                Ok(token) => token,
+                Err(error) => {
+                    if is_authentication_failure(error.category()) {
+                        self.mark_authentication_expired().await;
+                    }
+                    return Err(error);
+                }
+            };
+            response = self
+                .send_api_post_json(url, &refreshed_token, payload)
+                .await?;
         }
         self.ensure_generation(generation)?;
         if let Err(error) = ensure_api_success(&response) {
@@ -1033,7 +1461,7 @@ impl GitHubService {
             .bearer_auth(access_token)
             .header(header::ACCEPT, "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(map_transport_error)?;
@@ -1049,6 +1477,34 @@ impl GitHubService {
             headers,
             body,
             has_next,
+        })
+    }
+
+    async fn send_api_post_json<T: Serialize + ?Sized>(
+        &self,
+        url: Url,
+        access_token: &str,
+        payload: &T,
+    ) -> Result<ApiResponse, GitHubError> {
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(access_token)
+            .header(header::ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .json(payload)
+            .timeout(self.request_timeout)
+            .send()
+            .await
+            .map_err(map_transport_error)?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = read_bounded(response, MAX_API_RESPONSE_BYTES).await?;
+        Ok(ApiResponse {
+            status,
+            headers,
+            body,
+            has_next: false,
         })
     }
 
@@ -1301,6 +1757,56 @@ async fn bind_loopback_listener() -> Result<tokio::net::TcpListener, GitHubError
     Err(GitHubError::network_unavailable())
 }
 
+#[derive(Serialize)]
+struct GraphQlRequest<'a> {
+    query: &'static str,
+    variables: GraphQlVariables<'a>,
+}
+
+#[derive(Serialize)]
+struct GraphQlVariables<'a> {
+    login: &'a str,
+}
+
+#[derive(Serialize)]
+struct CreateRepositoryRequest<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+    private: bool,
+    auto_init: bool,
+}
+
+fn validate_repository_creation_input(
+    input: RepositoryCreationInput,
+) -> Result<RepositoryCreationInput, GitHubError> {
+    let name = validate_new_repository_name(&input.name)?;
+    let description = match input.description {
+        None => None,
+        Some(description) => {
+            if description.chars().count() > MAX_REPOSITORY_DESCRIPTION_CHARS
+                || description.chars().any(char::is_control)
+            {
+                return Err(GitHubError::invalid_input());
+            }
+            let description = description.trim();
+            (!description.is_empty()).then(|| description.to_string())
+        }
+    };
+    Ok(RepositoryCreationInput {
+        name,
+        description,
+        private: input.private,
+        initialize_readme: input.initialize_readme,
+    })
+}
+
+fn generate_review_id() -> Result<String, GitHubError> {
+    let mut random = [0_u8; REVIEW_ID_RANDOM_BYTES];
+    getrandom::fill(&mut random).map_err(|_| GitHubError::provider_unavailable())?;
+    Ok(URL_SAFE_NO_PAD.encode(random))
+}
+
 struct ApiResponse {
     status: StatusCode,
     headers: HeaderMap,
@@ -1418,6 +1924,7 @@ mod tests {
     use super::*;
     use crate::credentials::{MemoryStore, SecretStore};
     use connection_store::MemoryGitHubConnectionStore;
+    use creation_store::MemoryRepositoryCreationStore;
     use std::sync::{atomic::AtomicBool, Mutex as StdMutex};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -1435,6 +1942,33 @@ mod tests {
     }
 
     struct FailingSaveConnectionStore;
+
+    #[derive(Default)]
+    struct FailingRemoveCreationStore {
+        inner: MemoryRepositoryCreationStore,
+    }
+
+    impl RepositoryCreationStore for FailingRemoveCreationStore {
+        fn begin(&self, attempt: &StoredCreationAttempt) -> Result<(), GitHubError> {
+            self.inner.begin(attempt)
+        }
+
+        fn mark_outcome_unknown(
+            &self,
+            id: &str,
+            updated_at: chrono::DateTime<Utc>,
+        ) -> Result<(), GitHubError> {
+            self.inner.mark_outcome_unknown(id, updated_at)
+        }
+
+        fn remove(&self, _id: &str) -> Result<(), GitHubError> {
+            Err(GitHubError::credential_store())
+        }
+
+        fn list_unresolved(&self) -> Result<Vec<StoredCreationAttempt>, GitHubError> {
+            self.inner.list_unresolved()
+        }
+    }
 
     impl GitHubConnectionStore for FailingSaveConnectionStore {
         fn load(&self) -> Result<Option<StoredConnection>, GitHubError> {
@@ -1478,6 +2012,28 @@ mod tests {
                 socket.write_all(wire.as_bytes()).await.expect("response");
                 let _ = socket.shutdown().await;
             }
+        });
+        (format!("http://127.0.0.1:{port}"), requests, handle)
+    }
+
+    async fn serve_hanging_request(
+        hold: Duration,
+    ) -> (String, Arc<StdMutex<Vec<String>>>, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind hanging mock server");
+        let port = listener.local_addr().expect("address").port();
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let captured = Arc::clone(&requests);
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            let mut request = vec![0_u8; 16 * 1024];
+            let read = socket.read(&mut request).await.expect("read request");
+            captured
+                .lock()
+                .expect("captured requests")
+                .push(String::from_utf8_lossy(&request[..read]).into_owned());
+            tokio::time::sleep(hold).await;
         });
         (format!("http://127.0.0.1:{port}"), requests, handle)
     }
@@ -1558,6 +2114,7 @@ mod tests {
             base_url,
             store,
             connection_store,
+            Arc::new(MemoryRepositoryCreationStore::default()),
         );
         service.limits = limits;
         service
@@ -2334,6 +2891,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loads_the_connected_accounts_profile_contribution_calendar() {
+        let body = r#"{"data":{"user":{"contributionsCollection":{"contributionCalendar":{"totalContributions":8,"weeks":[{"firstDay":"2026-09-06","contributionDays":[{"contributionCount":3,"contributionLevel":"SECOND_QUARTILE","date":"2026-09-06","weekday":0},{"contributionCount":5,"contributionLevel":"FOURTH_QUARTILE","date":"2026-09-07","weekday":1}]}]}}}}}"#;
+        let (base, requests, server) = serve_sequence(vec![MockResponse {
+            status: "200 OK",
+            headers: "",
+            body: body.to_string(),
+        }])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let service = test_service(&base, store.clone(), ServiceLimits::default());
+        mark_connected(&service, store.as_ref()).await;
+
+        let calendar = service
+            .contribution_calendar()
+            .await
+            .expect("contribution calendar");
+        server.await.expect("mock server");
+
+        assert_eq!(calendar.total_contributions, 8);
+        assert_eq!(calendar.weeks[0].days[0].contribution_count, 3);
+        assert_eq!(calendar.weeks[0].days[1].level, 4);
+        let request = &requests.lock().expect("requests")[0];
+        assert!(request.starts_with("POST /graphql HTTP/1.1"));
+        assert!(request.contains("EllieContributionCalendar"));
+        assert!(request.contains(r#""login":"octo-cat""#));
+    }
+
+    #[tokio::test]
     async fn endpoint_errors_map_to_redacted_categories() {
         for (status, headers, body, expected) in [
             (
@@ -2412,6 +2997,337 @@ mod tests {
                 GitHubErrorCategory::AccountResponseInvalid
             );
         }
+    }
+
+    fn repository_creation_input() -> RepositoryCreationInput {
+        RepositoryCreationInput {
+            name: "ellie-workspace".to_string(),
+            description: Some("Private workspace repository".to_string()),
+            private: true,
+            initialize_readme: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn repository_creation_uses_reviewed_personal_request_once() {
+        let repository = serde_json::json!({
+            "id": 99,
+            "name": "ellie-workspace",
+            "full_name": "octo-cat/ellie-workspace",
+            "private": true,
+            "default_branch": "main",
+            "html_url": "https://github.com/octo-cat/ellie-workspace"
+        });
+        let (base, requests, server) = serve_sequence(vec![MockResponse {
+            status: "201 Created",
+            headers: "",
+            body: repository.to_string(),
+        }])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let service = test_service(&base, store.clone(), ServiceLimits::default());
+        mark_connected(&service, store.as_ref()).await;
+
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare repository");
+        assert_eq!(review.owner, "octo-cat");
+        assert!(review.private);
+        assert!(review.initialize_readme);
+        let created = service
+            .confirm_repository_creation(&review.review_id)
+            .await
+            .expect("create repository");
+        server.await.expect("mock server");
+        assert_eq!(created.id, 99);
+        assert!(service
+            .repository_creation_status()
+            .await
+            .expect("creation status")
+            .is_empty());
+        assert_eq!(
+            service
+                .confirm_repository_creation(&review.review_id)
+                .await
+                .expect_err("review is single-use")
+                .category(),
+            GitHubErrorCategory::InvalidInput
+        );
+        let request = &requests.lock().expect("requests")[0];
+        assert!(request.starts_with("POST /user/repos HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer ghu_sanitized_access_value"));
+        assert!(request.contains("\"name\":\"ellie-workspace\""));
+        assert!(request.contains("\"description\":\"Private workspace repository\""));
+        assert!(request.contains("\"private\":true"));
+        assert!(request.contains("\"auto_init\":true"));
+    }
+
+    #[tokio::test]
+    async fn confirmed_creation_stays_successful_when_local_cleanup_fails() {
+        let repository = serde_json::json!({
+            "id": 99,
+            "name": "ellie-workspace",
+            "full_name": "octo-cat/ellie-workspace",
+            "private": true,
+            "default_branch": "main",
+            "html_url": "https://github.com/octo-cat/ellie-workspace"
+        });
+        let (base, _, server) = serve_sequence(vec![MockResponse {
+            status: "201 Created",
+            headers: "",
+            body: repository.to_string(),
+        }])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        store
+            .set(CLIENT_SECRET_ACCOUNT, TEST_CLIENT_SECRET)
+            .expect("store client secret");
+        let service = GitHubService::with_auth_base(
+            test_client(),
+            &base,
+            &base,
+            store.clone(),
+            Arc::new(MemoryGitHubConnectionStore::default()),
+            Arc::new(FailingRemoveCreationStore::default()),
+        );
+        mark_connected(&service, store.as_ref()).await;
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare repository");
+
+        let created = service
+            .confirm_repository_creation(&review.review_id)
+            .await
+            .expect("remote success must remain success");
+
+        server.await.expect("mock server");
+        assert_eq!(created.id, 99);
+        assert_eq!(
+            service
+                .repository_creation_status()
+                .await
+                .expect("cleanup warning remains resolvable")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn repository_review_expires_and_is_bound_to_the_prepared_account() {
+        let now = Arc::new(StdMutex::new(Instant::now()));
+        let store = Arc::new(MemoryStore::default());
+        let mut service = test_service(
+            "http://127.0.0.1:9",
+            store.clone(),
+            ServiceLimits::default(),
+        );
+        let clock = Arc::clone(&now);
+        service.authorization_now = Arc::new(move || *clock.lock().expect("test clock"));
+        mark_connected(&service, store.as_ref()).await;
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare expiring review");
+        *now.lock().expect("clock") += REPOSITORY_REVIEW_LIFETIME + Duration::from_secs(1);
+        assert_eq!(
+            service
+                .confirm_repository_creation(&review.review_id)
+                .await
+                .expect_err("expired review")
+                .category(),
+            GitHubErrorCategory::InvalidInput
+        );
+
+        *now.lock().expect("clock") = Instant::now();
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare account-bound review");
+        service.connection.lock().expect("connection").account = Some(GitHubAccount {
+            id: 7,
+            login: "different-account".to_string(),
+        });
+        assert_eq!(
+            service
+                .confirm_repository_creation(&review.review_id)
+                .await
+                .expect_err("account changed")
+                .category(),
+            GitHubErrorCategory::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn repository_creation_gate_does_not_consume_a_busy_review() {
+        let repository = serde_json::json!({
+            "id": 99,
+            "name": "ellie-workspace",
+            "full_name": "octo-cat/ellie-workspace",
+            "private": true,
+            "default_branch": "main",
+            "html_url": "https://github.com/octo-cat/ellie-workspace"
+        });
+        let (base, _, server) = serve_sequence(vec![MockResponse {
+            status: "201 Created",
+            headers: "",
+            body: repository.to_string(),
+        }])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let service = test_service(&base, store.clone(), ServiceLimits::default());
+        mark_connected(&service, store.as_ref()).await;
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare");
+        let guard = service.repository_creation_gate.lock().await;
+        assert_eq!(
+            service
+                .confirm_repository_creation(&review.review_id)
+                .await
+                .expect_err("busy")
+                .category(),
+            GitHubErrorCategory::Busy
+        );
+        drop(guard);
+        service
+            .confirm_repository_creation(&review.review_id)
+            .await
+            .expect("review remains usable");
+        server.await.expect("mock server");
+    }
+
+    #[tokio::test]
+    async fn repository_creation_errors_are_redacted_and_classified() {
+        for (status, headers, expected) in [
+            (
+                "422 Unprocessable Entity",
+                "",
+                GitHubErrorCategory::Conflict,
+            ),
+            (
+                "403 Forbidden",
+                "X-RateLimit-Remaining: 0\r\n",
+                GitHubErrorCategory::RateLimited,
+            ),
+            ("403 Forbidden", "", GitHubErrorCategory::PermissionDenied),
+            (
+                "401 Unauthorized",
+                "",
+                GitHubErrorCategory::AuthenticationExpired,
+            ),
+        ] {
+            let secret_body = r#"{"message":"secret provider detail token-value"}"#;
+            let (base, _, server) = serve_sequence(vec![MockResponse {
+                status,
+                headers,
+                body: secret_body.to_string(),
+            }])
+            .await;
+            let store = Arc::new(MemoryStore::default());
+            let service = test_service(&base, store.clone(), ServiceLimits::default());
+            mark_connected(&service, store.as_ref()).await;
+            let review = service
+                .prepare_repository_creation(repository_creation_input())
+                .await
+                .expect("prepare");
+            let error = service
+                .confirm_repository_creation(&review.review_id)
+                .await
+                .expect_err("creation error");
+            server.await.expect("mock server");
+            assert_eq!(error.category(), expected);
+            let serialized = serde_json::to_string(&error).expect("redacted error");
+            assert!(!serialized.contains("secret provider detail"));
+            assert!(service
+                .repository_creation_status()
+                .await
+                .expect("status")
+                .is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn timed_out_repository_creation_is_persisted_as_outcome_unknown() {
+        let (base, requests, server) = serve_hanging_request(Duration::from_millis(150)).await;
+        let store = Arc::new(MemoryStore::default());
+        let mut service = test_service(&base, store.clone(), ServiceLimits::default());
+        service.request_timeout = Duration::from_millis(25);
+        mark_connected(&service, store.as_ref()).await;
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare");
+        let error = service
+            .confirm_repository_creation(&review.review_id)
+            .await
+            .expect_err("timeout is uncertain");
+        assert_eq!(
+            error.category(),
+            GitHubErrorCategory::CreationOutcomeUnknown
+        );
+        let unresolved = service
+            .repository_creation_status()
+            .await
+            .expect("unresolved status");
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0].attempt_id, review.review_id);
+        assert_eq!(unresolved[0].owner, "octo-cat");
+        assert_eq!(
+            unresolved[0].state,
+            RepositoryCreationAttemptState::OutcomeUnknown
+        );
+        server.await.expect("hanging server");
+        assert_eq!(requests.lock().expect("requests").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn uncertain_creation_requires_matching_account_resolution() {
+        let (base, _, server) = serve_hanging_request(Duration::from_millis(150)).await;
+        let store = Arc::new(MemoryStore::default());
+        let mut service = test_service(&base, store.clone(), ServiceLimits::default());
+        service.request_timeout = Duration::from_millis(25);
+        mark_connected(&service, store.as_ref()).await;
+        let review = service
+            .prepare_repository_creation(repository_creation_input())
+            .await
+            .expect("prepare");
+        service
+            .confirm_repository_creation(&review.review_id)
+            .await
+            .expect_err("timeout is uncertain");
+        server.await.expect("hanging server");
+
+        service.connection.lock().expect("connection").account = Some(GitHubAccount {
+            id: 7,
+            login: "different-account".to_string(),
+        });
+        assert_eq!(
+            service
+                .resolve_repository_creation(
+                    &review.review_id,
+                    RepositoryCreationResolution::NotFound,
+                )
+                .await
+                .expect_err("different account cannot resolve")
+                .category(),
+            GitHubErrorCategory::PermissionDenied
+        );
+        service.connection.lock().expect("connection").account = Some(GitHubAccount {
+            id: 42,
+            login: "octo-cat".to_string(),
+        });
+        service
+            .resolve_repository_creation(&review.review_id, RepositoryCreationResolution::Exists)
+            .await
+            .expect("matching account resolves locally");
+        assert!(service
+            .repository_creation_status()
+            .await
+            .expect("status")
+            .is_empty());
     }
 
     #[tokio::test]

@@ -27,6 +27,8 @@ const GITHUB_ERROR_CATEGORIES: readonly GitHubErrorCategory[] = [
   "malformed_response",
   "credential_store",
   "cancelled",
+  "conflict",
+  "creation_outcome_unknown",
 ];
 
 /** Pulls the redacted category out of a Tauri IPC rejection, if present. */

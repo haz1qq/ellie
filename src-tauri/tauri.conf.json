@@ -14,13 +14,13 @@
       {
         "label": "main",
         "title": "Ellie",
-        "width": 780,
-        "height": 800,
+        "width": 1160,
+        "height": 820,
         "minWidth": 420,
         "minHeight": 580,
         "center": true,
         "theme": "Dark",
-        "backgroundColor": "#151516"
+        "backgroundColor": "#0e0e11"
       },
       {
         "label": "mini",

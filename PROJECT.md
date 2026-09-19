@@ -14,13 +14,13 @@ The milestones and checklists describe intended deliverables, not completed impl
 
 Work on one explicitly agreed milestone or scoped task at a time. Do not proceed to the next milestone without instruction.
 
-## Planned workspace expansion — documentation only
+## Workspace expansion — active phased implementation
 
-The owner has selected a proposed expansion alongside existing AI monitoring: authorized GitHub repository/commit tracking and repository creation, private local to-do lists, an improved dashboard, and an expanded optional mini HUD. “Full GitHub access” is narrowed to **track + create**, not unrestricted administration, code editing, or deletion.
+The owner has selected an expansion alongside existing AI monitoring: authorized GitHub repository/commit tracking and repository creation, private local to-do lists, an improved dashboard, and an expanded optional mini HUD. “Full GitHub access” is narrowed to **track + create**, not unrestricted administration, code editing, or deletion.
 
-See [workspace upgrade plan](docs/workspace-upgrade.md), [interface design](docs/workspace-interface.md), and [backend design](docs/workspace-backend.md). These define proposed W1–W6 phases separately from the original milestones below. No workspace implementation milestone is started or completed by this documentation. Authentication/permissions and detailed delivery choices still require verification and approval. Existing AI monitoring and local API/CLI contracts remain intact; each implementation phase needs explicit authorization.
+See [workspace upgrade plan](docs/workspace-upgrade.md), [interface design](docs/workspace-interface.md), [backend design](docs/workspace-backend.md), and [GitHub authentication design](docs/workspace-github-auth.md). The GitHub App authentication foundation, secure credentials, connection persistence, repository/commit reads, personal repository prepare/confirm flow, local lists/tasks, and library-backed command-center main app are implemented on `feat/workspace-github`; live sign-in has succeeded. Repository/commit loading, restart restoration, disconnect cleanup, and an owner-authorized live repository creation still need recorded verification. The expanded mini HUD remains a future phase.
 
-This supplements the original AI-first product scope rather than replacing its trust, privacy, or compatibility requirements.
+This supplements the original AI-first product scope rather than replacing its trust, privacy, or compatibility requirements. Existing AI monitoring and local API/CLI contracts remain intact.
 
 ## Contents
 

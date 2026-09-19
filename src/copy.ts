@@ -32,6 +32,8 @@ export const githubErrorCopy: Record<GitHubErrorCategory, string> = {
   malformed_response: "GitHub returned an unexpected response. Existing data is unchanged; retry.",
   credential_store: "GitHub credentials couldn’t be saved securely. Check Windows Credential Manager access, then retry.",
   cancelled: "The GitHub operation was cancelled.",
+  conflict: "A repository with that name already exists on the connected account. Choose another name.",
+  creation_outcome_unknown: "GitHub received the creation request, but the result was lost. Inspect your repositories before retrying; Ellie will not create it twice on its own.",
 };
 
 /** Fallback copy for unknown or non-categorical failures; never raw errors. */
