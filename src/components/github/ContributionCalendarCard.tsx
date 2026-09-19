@@ -1,5 +1,5 @@
 import { Activity, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   desktop,
   type GitHubContributionCalendar,
@@ -87,11 +87,6 @@ export function ContributionCalendarCard({
     };
   }, [native, connected, login, reload, year]);
 
-  const weekCount = calendar?.weeks.length ?? 52;
-  const gridStyle = useMemo<CSSProperties>(
-    () => ({ "--weeks": weekCount } as CSSProperties),
-    [weekCount],
-  );
   const monthLabels = useMemo(
     () => calendar?.weeks.map(monthLabel) ?? [],
     [calendar],
@@ -171,7 +166,6 @@ export function ContributionCalendarCard({
           <div className="contribution-calendar-scroll">
             <div
               className="contribution-calendar-canvas"
-              style={gridStyle}
               role="img"
               aria-label={`${calendar.totalContributions} GitHub profile contributions for ${login ?? "the connected account"} from ${calendar.startedOn} through ${calendar.endedOn}.`}
             >
@@ -183,38 +177,39 @@ export function ContributionCalendarCard({
                   label ? (
                     <span
                       key={`${calendar.weeks[index]?.firstDay ?? index}-${label}`}
-                      style={{ gridColumn: index + 1 }}
+                      style={{ gridColumn: index + 2 }}
                     >
                       {label}
                     </span>
                   ) : null,
                 )}
               </div>
-              <div className="contribution-calendar-body">
-                <div className="contribution-weekdays" aria-hidden="true">
-                  <span style={{ gridRow: 2 }}>Mon</span>
-                  <span style={{ gridRow: 4 }}>Wed</span>
-                  <span style={{ gridRow: 6 }}>Fri</span>
-                </div>
-                <div className="contribution-weeks">
-                  {calendar.weeks.map((week, weekIndex) => (
-                    <div className="contribution-week" key={week.firstDay}>
-                      {week.days.map((day, dayIndex) => (
-                        <span
-                          key={day.date}
-                          className={`contribution-cell contribution-level-${day.level}`}
-                          style={{
-                            gridRow: day.weekday + 1,
-                            gridColumn: weekIndex + 1,
-                            "--i": Math.min(weekIndex * 7 + dayIndex, 60),
-                          } as CSSProperties}
-                          title={`${dateLabel(day.date)}: ${day.contributionCount} contribution${day.contributionCount === 1 ? "" : "s"}`}
-                          aria-hidden="true"
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
+              <div className="contribution-weeks" aria-hidden="true">
+                <span className="contribution-weekday-label" style={{ gridColumn: 1, gridRow: 2 }}>
+                  Mon
+                </span>
+                <span className="contribution-weekday-label" style={{ gridColumn: 1, gridRow: 4 }}>
+                  Wed
+                </span>
+                <span className="contribution-weekday-label" style={{ gridColumn: 1, gridRow: 6 }}>
+                  Fri
+                </span>
+                {calendar.weeks.map((week, weekIndex) => (
+                  <Fragment key={week.firstDay}>
+                    {week.days.map((day, dayIndex) => (
+                      <span
+                        key={day.date}
+                        className={`contribution-cell contribution-level-${day.level}`}
+                        style={{
+                          gridRow: day.weekday + 1,
+                          gridColumn: weekIndex + 2,
+                          "--i": Math.min(weekIndex * 7 + dayIndex, 60),
+                        } as CSSProperties}
+                        title={`${dateLabel(day.date)}: ${day.contributionCount} contribution${day.contributionCount === 1 ? "" : "s"}`}
+                      />
+                    ))}
+                  </Fragment>
+                ))}
               </div>
             </div>
           </div>
