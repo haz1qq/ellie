@@ -17,7 +17,7 @@ Proposed navigation: **Overview · AI Usage · GitHub · To-do · History · Set
 | Overview | AI allowance rows, current task, scoped GitHub activity, task counts | Add task; open detail pages; new repository |
 | AI Usage | Existing detailed provider cards and supported metrics | Refresh; hide provider |
 | GitHub | Connection state, repositories, bounded commit history and scope | Connect; select tracked repositories; sync; new repository |
-| To-do | Lists, tasks, filters, current-task pin | Add/edit; complete/reopen; pin; confirmed deletion |
+| To-do | One local task board, Work/Personal filters, due dates, current-task pin | Add/edit; complete/reopen; pin as sticky note; confirmed deletion |
 | History | Existing AI analytics and source labels | Existing date-range controls |
 | Settings | Existing preferences plus GitHub connection and HUD content settings | Existing controls; connection management; HUD configuration |
 
@@ -97,14 +97,18 @@ Do not imply that a commit timestamp is a push timestamp. Personal counts use ve
 ### To-do
 
 ```text
-To-do                                                  [Add task]
-[List selector] [Open / Completed / All] [Priority] [Due state]
+My tasks                                               [New task]
+Open · Completed · Overdue · Sticky
+[All / Open / Completed] [Work + Personal] [Priority]
 ──────────────────────────────────────────────────────────────────
-[ ] Task title       High · due date · optional repo    [Pin] [Edit]
-[x] Completed task   Completed date                     [Reopen]
+[ ] Task title   Work · High · due date · optional repo [⋯]
+[ ] Study Rust   Personal · due date                    [⋯]
+[x] Completed task                                      [Reopen]
 ```
 
-The editor includes title, optional notes, priority, optional calendar due date, and optional repository link. Labels remain visible; required/invalid states include text. Save success follows durable persistence. Failed saves retain drafts. Confirm list deletion with affected-task count; task deletion also requires confirmation. Completing/deleting a pinned task clears the pin, without choosing a replacement.
+Ellie creates one internal `My tasks` list on first bootstrap and presents it as a single local board; users do not configure a storage destination or manage list containers. The editor includes task name, optional details, explicit Work/Personal type, priority, optional calendar due date, and an optional repository link shown only for Work. Labels remain visible; required/invalid states include text. Save success follows durable SQLite persistence and failed saves retain drafts. Task deletion requires confirmation.
+
+Pinning one incomplete task promotes it to Overview → Focus and opens Ellie's custom `task-note` window: always on top, taskbar-free, draggable, and position-persistent. It shows only the pinned task with Complete, Unpin, and Open Ellie actions. Completing, deleting, or unpinning clears the pin and closes the note without choosing a replacement. This dedicated sticky note is separate from the unchanged quota-only mini bar and does not implement the pending expanded HUD.
 
 ## Repository creation interaction
 
@@ -114,7 +118,7 @@ While submitted, disable duplicate creation. A timeout yields **Creation outcome
 
 ## Expanded HUD
 
-Preserve the existing mini window identity and quota-only mode. Add optional GitHub and current-task sections; default both off on upgrade. No second desktop panel.
+Preserve the existing mini window identity and quota-only mode. Add optional GitHub and current-task sections; default both off on upgrade. W6 does not add a second command-center panel; the separately owner-authorized `task-note` window is a bounded sticky note for one pinned local task, not the expanded HUD.
 
 ```text
 ┌────────────────────────────────────────────────────────────────┐
@@ -153,11 +157,11 @@ Use real navigation controls with current-page state, a skip-to-content link, vi
 
 The main app now uses a command-center shell with a left navigation rail (Overview, AI Usage, GitHub, To-do, History, Settings), a top action bar with a Ctrl+K quick-action palette, and a library-backed React UI. Overview derives every displayed value from existing typed AI, GitHub, task, and analytics data — no invented quota values, commit counts, or charts. It includes KPI cards, a provider summary sheet, a pinned Focus task card, a token-trend chart (Recharts), scoped recent commits, attention items, upcoming tasks, and a local activity feed. Disconnected GitHub shows an invitation rather than a zero; empty task state invites the first task.
 
-Libraries adopted and where used: `lucide-react` (icons across the shell, dashboard, GitHub, tasks), `@radix-ui/react-dialog` (task/list editor, repository creation review, confirmations, command palette), `@radix-ui/react-select` (task editor list/priority/repository pickers), `@radix-ui/react-dropdown-menu` (row actions), `@radix-ui/react-checkbox` (task completion), `recharts` (token trend area chart and quota utilization bars on History and Overview), `clsx` (variant composition in UI primitives), and `sonner` (save/key/delete toasts). No remote assets, telemetry, or runtime CDNs are used.
+Libraries adopted and where used: `lucide-react` (icons across the shell, dashboard, GitHub, tasks, and sticky note), `@radix-ui/react-dialog` (task editor, repository creation review, confirmations, command palette), `@radix-ui/react-select` (task priority/repository and page filters), `@radix-ui/react-dropdown-menu` (row actions), `@radix-ui/react-checkbox` (task completion), `recharts` (token trend area chart and quota utilization bars on History and Overview), `clsx` (variant composition in UI primitives), and `sonner` (save/key/delete toasts). No remote assets, telemetry, or runtime CDNs are used.
 
 The GitHub page now paginates the bounded loaded commit set with explicit loaded-count scope labels and a bounded-not-account-total footnote. The account-wide contribution calendar moved to Overview: Rust fetches the connected account's profile `contributionsCollection.contributionCalendar` through the GitHub GraphQL API (bounded, authenticated, validated, redacted), and Overview renders it with monthly labels, weekday hints, the profile total, an explicit date range, and a note that it includes all contribution types GitHub counts — it is not a local commit total. The per-repository activity grid was removed.
 
-Frontend checks after integration: `npm run typecheck`, `npm run lint`, `npm test` (9 files, 108 tests), and `npm run build` passed. A safe 1200×900 browser-preview capture was inspected; native Windows interaction/DPI smoke checks and a release install remain to be recorded.
+Frontend checks after the task-board/sticky-note integration: `npm run typecheck`, `npm run lint`, and `npm test` (10 files, 117 tests) passed; the final production build and native Windows sticky-note smoke check remain to be recorded. A safe 1200×900 browser-preview capture was inspected; native Windows interaction/DPI smoke checks and a release install remain to be recorded.
 
 ## W5b implementation status (verified on branch `feat/workspace-github`)
 

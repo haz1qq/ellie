@@ -28,6 +28,7 @@ pub struct AppState {
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
     pub mini_move_generation: AtomicU64,
+    pub task_note_move_generation: AtomicU64,
     pub provider_registry: ProviderRegistry,
     pub refresh: RefreshCoordinator,
 }
@@ -296,6 +297,25 @@ fn require_task_main_window(label: &str) -> Result<(), crate::tasks::TaskError> 
     require_main_window(label).map_err(|_| crate::tasks::TaskError::window_denied())
 }
 
+fn require_task_note_window(label: &str) -> Result<(), crate::tasks::TaskError> {
+    if label != crate::task_note::WINDOW_LABEL {
+        return Err(crate::tasks::TaskError::window_denied());
+    }
+    Ok(())
+}
+
+async fn sync_task_note(app: &AppHandle, tasks: Arc<crate::tasks::TaskService>) {
+    let snapshot = tauri::async_runtime::spawn_blocking(move || tasks.task_note_snapshot()).await;
+    match snapshot {
+        Ok(Ok(snapshot)) => {
+            if let Err(error) = crate::task_note::apply(app, &snapshot) {
+                tracing::warn!(event = "task_note_sync_failed", error = ?error);
+            }
+        }
+        _ => tracing::warn!(event = "task_note_sync_failed"),
+    }
+}
+
 #[tauri::command]
 pub async fn github_connection_status(
     window: tauri::WebviewWindow,
@@ -515,9 +535,12 @@ pub async fn task_delete_list(
 ) -> Result<(), crate::tasks::TaskError> {
     require_task_main_window(window.label())?;
     let tasks = Arc::clone(&app_state.tasks);
-    tauri::async_runtime::spawn_blocking(move || tasks.delete_list(list_id, expected_task_count))
+    let worker = Arc::clone(&tasks);
+    tauri::async_runtime::spawn_blocking(move || worker.delete_list(list_id, expected_task_count))
         .await
-        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -542,9 +565,12 @@ pub async fn task_update(
 ) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
     require_task_main_window(window.label())?;
     let tasks = Arc::clone(&app_state.tasks);
-    tauri::async_runtime::spawn_blocking(move || tasks.update_task(task_id, input))
+    let worker = Arc::clone(&tasks);
+    let task = tauri::async_runtime::spawn_blocking(move || worker.update_task(task_id, input))
         .await
-        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    Ok(task)
 }
 
 #[tauri::command]
@@ -556,9 +582,15 @@ pub async fn task_set_completed(
 ) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
     require_task_main_window(window.label())?;
     let tasks = Arc::clone(&app_state.tasks);
-    tauri::async_runtime::spawn_blocking(move || tasks.set_completed(task_id, completed))
-        .await
-        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+    let worker = Arc::clone(&tasks);
+    let task =
+        tauri::async_runtime::spawn_blocking(move || worker.set_completed(task_id, completed))
+            .await
+            .map_err(|_| {
+                crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage)
+            })??;
+    sync_task_note(window.app_handle(), tasks).await;
+    Ok(task)
 }
 
 #[tauri::command]
@@ -569,9 +601,12 @@ pub async fn task_delete(
 ) -> Result<(), crate::tasks::TaskError> {
     require_task_main_window(window.label())?;
     let tasks = Arc::clone(&app_state.tasks);
-    tauri::async_runtime::spawn_blocking(move || tasks.delete_task(task_id))
+    let worker = Arc::clone(&tasks);
+    tauri::async_runtime::spawn_blocking(move || worker.delete_task(task_id))
         .await
-        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -582,9 +617,60 @@ pub async fn task_set_pinned(
 ) -> Result<Option<i64>, crate::tasks::TaskError> {
     require_task_main_window(window.label())?;
     let tasks = Arc::clone(&app_state.tasks);
-    tauri::async_runtime::spawn_blocking(move || tasks.set_pinned(task_id))
+    let worker = Arc::clone(&tasks);
+    let pinned = tauri::async_runtime::spawn_blocking(move || worker.set_pinned(task_id))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    Ok(pinned)
+}
+
+#[tauri::command]
+pub async fn task_note_bootstrap(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<Option<crate::tasks::TaskItem>, crate::tasks::TaskError> {
+    require_task_note_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    tauri::async_runtime::spawn_blocking(move || tasks.pinned_task())
         .await
         .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))?
+}
+
+#[tauri::command]
+pub async fn task_note_complete(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<crate::tasks::TaskItem, crate::tasks::TaskError> {
+    require_task_note_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    let worker = Arc::clone(&tasks);
+    let task = tauri::async_runtime::spawn_blocking(move || worker.complete_pinned())
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    if crate::task_note::notify_main(window.app_handle()).is_err() {
+        tracing::warn!(event = "task_note_main_notify_failed");
+    }
+    Ok(task)
+}
+
+#[tauri::command]
+pub async fn task_note_unpin(
+    window: tauri::WebviewWindow,
+    app_state: State<'_, AppState>,
+) -> Result<(), crate::tasks::TaskError> {
+    require_task_note_window(window.label())?;
+    let tasks = Arc::clone(&app_state.tasks);
+    let worker = Arc::clone(&tasks);
+    tauri::async_runtime::spawn_blocking(move || worker.set_pinned(None))
+        .await
+        .map_err(|_| crate::tasks::TaskError::new(crate::tasks::TaskErrorCategory::Storage))??;
+    sync_task_note(window.app_handle(), tasks).await;
+    if crate::task_note::notify_main(window.app_handle()).is_err() {
+        tracing::warn!(event = "task_note_main_notify_failed");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -594,10 +680,14 @@ mod local_api_ipc_tests {
         assert!(super::require_main_window("main").is_ok());
         assert!(super::require_github_main_window("main").is_ok());
         assert!(super::require_task_main_window("main").is_ok());
-        for label in ["mini", "", "other"] {
+        assert!(super::require_task_note_window("task-note").is_ok());
+        for label in ["mini", "task-note", "", "other"] {
             assert!(super::require_main_window(label).is_err());
             assert!(super::require_github_main_window(label).is_err());
             assert!(super::require_task_main_window(label).is_err());
+        }
+        for label in ["main", "mini", "", "other"] {
+            assert!(super::require_task_note_window(label).is_err());
         }
     }
 
@@ -608,6 +698,7 @@ mod local_api_ipc_tests {
         let build_manifest = include_str!("../build.rs");
         let main_capability = include_str!("../capabilities/main.json");
         let mini_capability = include_str!("../capabilities/mini.json");
+        let task_note_capability = include_str!("../capabilities/task-note.json");
         for command in [
             "github_connection_status",
             "github_save_client_id",
@@ -648,6 +739,7 @@ mod local_api_ipc_tests {
                 "{command} must be allowed only by the main capability"
             );
             assert!(!mini_capability.contains(&permission));
+            assert!(!task_note_capability.contains(&permission));
         }
     }
 
@@ -658,6 +750,7 @@ mod local_api_ipc_tests {
         let build_manifest = include_str!("../build.rs");
         let main_capability = include_str!("../capabilities/main.json");
         let mini_capability = include_str!("../capabilities/mini.json");
+        let task_note_capability = include_str!("../capabilities/task-note.json");
         for command in [
             "task_bootstrap",
             "task_list",
@@ -686,6 +779,40 @@ mod local_api_ipc_tests {
             assert!(build_manifest.contains(&format!("\"{command}\"")));
             let permission = command.replace('_', "-");
             assert!(main_capability.contains(&format!("\"allow-{permission}\"")));
+            assert!(!mini_capability.contains(&permission));
+            assert!(!task_note_capability.contains(&permission));
+        }
+    }
+
+    #[test]
+    fn sticky_note_commands_use_the_dedicated_window_guard() {
+        let commands_source = include_str!("commands.rs");
+        let runtime_source = include_str!("lib.rs");
+        let build_manifest = include_str!("../build.rs");
+        let main_capability = include_str!("../capabilities/main.json");
+        let mini_capability = include_str!("../capabilities/mini.json");
+        let task_note_capability = include_str!("../capabilities/task-note.json");
+        for command in [
+            "task_note_bootstrap",
+            "task_note_complete",
+            "task_note_unpin",
+        ] {
+            let start = commands_source
+                .find(&format!("fn {command}"))
+                .unwrap_or_else(|| panic!("missing command {command}"));
+            let remainder = &commands_source[start..];
+            let end = remainder
+                .find("#[tauri::command]")
+                .unwrap_or(remainder.len());
+            assert!(
+                remainder[..end].contains("require_task_note_window(window.label())?"),
+                "{command} must enforce the sticky-note window guard"
+            );
+            assert!(runtime_source.contains(&format!("commands::{command}")));
+            assert!(build_manifest.contains(&format!("\"{command}\"")));
+            let permission = command.replace('_', "-");
+            assert!(task_note_capability.contains(&format!("\"allow-{permission}\"")));
+            assert!(!main_capability.contains(&permission));
             assert!(!mini_capability.contains(&permission));
         }
     }

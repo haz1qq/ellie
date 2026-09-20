@@ -288,6 +288,7 @@ export interface RepositoryCreationAttemptStatus {
 
 /** Local task workspace (additive, main-window-only Rust commands). */
 export type TaskPriority = "none" | "low" | "medium" | "high";
+export type TaskKind = "work" | "personal";
 export type TaskCompletionFilter = "all" | "open" | "completed";
 export interface TaskRepositoryInput {
   repositoryId: number;
@@ -308,6 +309,7 @@ export interface TaskItem {
   listId: number;
   title: string;
   notes: string | null;
+  kind: TaskKind;
   priority: TaskPriority;
   dueDate: string | null;
   repository: TaskRepositoryLink | null;
@@ -358,6 +360,10 @@ export const desktop = {
     ),
   onMiniSettingsUpdated: (callback: (settings: Settings) => void) =>
     listen<Settings>("mini-settings-updated", (event) => callback(event.payload)),
+  onTasksUpdated: (callback: () => void) =>
+    listen<void>("tasks-updated", () => callback()),
+  onTaskNoteUpdated: (callback: (task: TaskItem | null) => void) =>
+    listen<TaskItem | null>("task-note-updated", (event) => callback(event.payload)),
   refreshAll: () => invoke<RefreshResponse>("refresh_all"),
   refreshProvider: (providerId: string) =>
     invoke<RefreshResponse>("refresh_provider", { providerId }),
@@ -427,12 +433,16 @@ export const desktop = {
   taskDelete: (taskId: number) => invoke<void>("task_delete", { taskId }),
   taskSetPinned: (taskId: number | null) =>
     invoke<number | null>("task_set_pinned", { taskId }),
+  taskNoteBootstrap: () => invoke<TaskItem | null>("task_note_bootstrap"),
+  taskNoteComplete: () => invoke<TaskItem>("task_note_complete"),
+  taskNoteUnpin: () => invoke<void>("task_note_unpin"),
 };
 
 export interface TaskInput {
   listId: number;
   title: string;
   notes: string | null;
+  kind: TaskKind;
   priority: TaskPriority;
   dueDate: string | null;
   repository: TaskRepositoryInput | null;

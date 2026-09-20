@@ -214,6 +214,7 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
         onOpenTodo={() => onNavigate("todos")}
         onEdit={onEditTask}
         onComplete={(taskId) => void tasks.setCompleted(taskId, true)}
+        onShowNote={(taskId) => void tasks.setPinned(taskId)}
         onUnpin={() => void tasks.setPinned(null)}
       />
 

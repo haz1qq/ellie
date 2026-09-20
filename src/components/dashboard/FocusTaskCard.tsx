@@ -1,4 +1,4 @@
-import { Pin, PinOff, SquarePen } from "lucide-react";
+import { BriefcaseBusiness, Heart, Pin, PinOff, SquarePen, StickyNote } from "lucide-react";
 import type { TaskItem } from "../../lib/desktop";
 import { formatDueDate } from "../../lib/format";
 import { PriorityBadge } from "../ui/Badge";
@@ -13,6 +13,7 @@ export interface FocusTaskCardProps {
   onOpenTodo: () => void;
   onEdit: (task: TaskItem) => void;
   onComplete: (taskId: number) => void;
+  onShowNote: (taskId: number) => void;
   onUnpin: () => void;
 }
 
@@ -25,6 +26,7 @@ export function FocusTaskCard({
   onOpenTodo,
   onEdit,
   onComplete,
+  onShowNote,
   onUnpin,
 }: FocusTaskCardProps) {
   const noneOpen = tasks.length > 0 && tasks.every((task) => task.completedAt);
@@ -49,6 +51,10 @@ export function FocusTaskCard({
         <div className="focus-task">
           <h3 className="focus-task-title">{pinnedTask.title}</h3>
           <div className="focus-task-meta">
+            <span className={`task-kind-chip task-kind-${pinnedTask.kind}`}>
+              {pinnedTask.kind === "work" ? <BriefcaseBusiness size={10} /> : <Heart size={10} />}
+              {pinnedTask.kind === "work" ? "Work" : "Personal"}
+            </span>
             <PriorityBadge priority={pinnedTask.priority} />
             {pinnedTask.dueDate && (
               <span className="focus-task-due">{formatDueDate(pinnedTask.dueDate)}</span>
@@ -61,6 +67,10 @@ export function FocusTaskCard({
           <div className="focus-task-actions">
             <Button size="sm" onClick={() => onComplete(pinnedTask.id)} disabled={busy || !native}>
               Complete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onShowNote(pinnedTask.id)} disabled={busy || !native}>
+              <StickyNote size={13} />
+              Show sticky
             </Button>
             <Button size="sm" variant="ghost" onClick={() => onEdit(pinnedTask)} disabled={busy || !native}>
               Edit

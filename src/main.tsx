@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import MiniBar from "./components/MiniBar";
+import TaskStickyNote from "./components/tasks/TaskStickyNote";
 import { desktop } from "./lib/desktop";
 import "./styles.css";
 
@@ -13,6 +14,12 @@ document.documentElement.dataset.window = windowLabel;
 document.body.dataset.window = windowLabel;
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    {windowLabel === "mini" ? <MiniBar /> : <App />}
+    {windowLabel === "mini" ? (
+      <MiniBar />
+    ) : windowLabel === "task-note" ? (
+      <TaskStickyNote />
+    ) : (
+      <App />
+    )}
   </React.StrictMode>,
 );

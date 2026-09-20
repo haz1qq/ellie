@@ -40,6 +40,9 @@ fn main() {
             "task_set_completed",
             "task_delete",
             "task_set_pinned",
+            "task_note_bootstrap",
+            "task_note_complete",
+            "task_note_unpin",
         ]),
     ))
     .expect("failed to build Ellie application resources");

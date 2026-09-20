@@ -122,6 +122,22 @@ export function useTasks(native: boolean): TaskController {
     }
   }, []);
 
+  useEffect(() => {
+    if (!native) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void desktop.onTasksUpdated(() => {
+      if (active) void refresh();
+    }).then((stop) => {
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [native, refresh]);
+
   async function run<T>(
     action: () => Promise<T>,
   ): Promise<T | null> {

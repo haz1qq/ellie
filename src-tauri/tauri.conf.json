@@ -37,12 +37,28 @@
         "transparent": true,
         "backgroundColor": "#00000000",
         "shadow": false
+      },
+      {
+        "label": "task-note",
+        "title": "Ellie Sticky Note",
+        "width": 360,
+        "height": 300,
+        "center": true,
+        "visible": false,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "theme": "Dark",
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "shadow": false
       }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-src 'none'",
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; object-src 'none'; base-uri 'none'; frame-src 'none'",
-      "capabilities": ["main", "mini"]
+      "capabilities": ["main", "mini", "task-note"]
     }
   },
   "bundle": {

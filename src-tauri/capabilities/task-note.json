@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "task-note",
+  "description": "The local Ellie sticky note may read and complete only the currently pinned task, unpin itself, listen for pinned-task updates, drag itself, and restore the main dashboard. It cannot manage other tasks, GitHub, providers, settings, or credentials.",
+  "windows": ["task-note"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-open-main-window",
+    "allow-task-note-bootstrap",
+    "allow-task-note-complete",
+    "allow-task-note-unpin"
+  ]
+}
