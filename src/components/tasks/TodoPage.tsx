@@ -1,22 +1,22 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useRef, useState } from "react";
 import {
+  BriefcaseBusiness,
   CalendarClock,
   CheckCircle2,
-  FolderPlus,
+  Heart,
+  ListChecks,
   Pencil,
   Pin,
   PinOff,
   Plus,
-  SquarePen,
   Trash2,
 } from "lucide-react";
-import {
-  desktop,
-  type TaskCompletionFilter,
-  type TaskItem,
-  type TaskInput,
-  type TaskPriority,
+import type {
+  TaskCompletionFilter,
+  TaskItem,
+  TaskInput,
+  TaskKind,
+  TaskPriority,
 } from "../../lib/desktop";
 import { formatDueDate, isOverdue } from "../../lib/format";
 import type { TaskController } from "../../lib/tasks";
@@ -26,7 +26,7 @@ import { Checkbox } from "../ui/Checkbox";
 import { EmptyState, Spinner } from "../ui/Panel";
 import { Menu } from "../ui/Menu";
 import { Modal, ModalActions } from "../ui/Modal";
-import { Field, Select } from "../ui/Select";
+import { Select } from "../ui/Select";
 import { TaskEditorDialog } from "./TaskEditorDialog";
 
 const COMPLETION_OPTIONS: Array<{ value: TaskCompletionFilter; label: string }> = [
@@ -35,7 +35,13 @@ const COMPLETION_OPTIONS: Array<{ value: TaskCompletionFilter; label: string }> 
   { value: "completed", label: "Completed" },
 ];
 
-const PRIORITY_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
+const KIND_OPTIONS: Array<{ value: TaskKind | "any"; label: string }> = [
+  { value: "any", label: "Work + personal" },
+  { value: "work", label: "Work" },
+  { value: "personal", label: "Personal" },
+];
+
+const PRIORITY_FILTER_OPTIONS: Array<{ value: TaskPriority | "any"; label: string }> = [
   { value: "any", label: "Any priority" },
   { value: "none", label: "No priority" },
   { value: "low", label: "Low" },
@@ -47,60 +53,46 @@ export interface TodoPageProps {
   native: boolean;
   tasks: TaskController;
   repositories: Array<{ id: number; fullName: string; htmlUrl: string }>;
-  /** Commanded from elsewhere (dashboard/new-task action): opens the editor. */
   createRequest: number;
   onConsumeCreateRequest: () => void;
-  /** Commanded from the dashboard focus card: open the editor for this task. */
   editTaskId?: number | null;
   onConsumeEditRequest?: () => void;
 }
 
-/** Column header helper. */
-export function TodoPage(props: TodoPageProps) {
-  const {
-    native,
-    tasks,
-    repositories,
-    createRequest,
-    onConsumeCreateRequest,
-    editTaskId,
-    onConsumeEditRequest,
-  } = props;
-  const [selectedListId, setSelectedListId] = useState<number | null>(null);
+/** Ellie's single, local-first task board. */
+export function TodoPage({
+  native,
+  tasks,
+  repositories,
+  createRequest,
+  onConsumeCreateRequest,
+  editTaskId,
+  onConsumeEditRequest,
+}: TodoPageProps) {
   const [completion, setCompletion] = useState<TaskCompletionFilter>("all");
+  const [kindFilter, setKindFilter] = useState<TaskKind | "any">("any");
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "any">("any");
-
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
   const [saveError, setSaveError] = useState("");
-  const [createTaskAfterList, setCreateTaskAfterList] = useState(false);
-
-  const [listDialog, setListDialog] = useState<"create" | "rename" | "delete" | null>(null);
-  const [listName, setListName] = useState("");
-  const [listDeleteTarget, setListDeleteTarget] = useState<{ id: number; name: string; count: number } | null>(null);
-  const [listDeleteLoading, setListDeleteLoading] = useState(false);
-
   const [deleteTask, setDeleteTask] = useState<TaskItem | null>(null);
   const [deleteTaskLoading, setDeleteTaskLoading] = useState(false);
-
-  // Re-request from the shell (e.g. "Add a task" in the top bar).
   const [lastCreateRequest, setLastCreateRequest] = useState(0);
+
+  const allTasks = tasks.tasks;
+  const allTasksRef = useRef(allTasks);
+  allTasksRef.current = allTasks;
+  const primaryListId = tasks.lists[0]?.id ?? null;
+
   useEffect(() => {
-    if (createRequest === lastCreateRequest) return;
+    if (createRequest === lastCreateRequest || tasks.loading) return;
     setLastCreateRequest(createRequest);
     setEditingTask(null);
     setSaveError("");
-    if (tasks.lists.length === 0) {
-      setCreateTaskAfterList(true);
-      setListName("");
-      setListDialog("create");
-    } else {
-      setEditorOpen(true);
-    }
+    if (primaryListId) setEditorOpen(true);
     onConsumeCreateRequest();
-  }, [createRequest, lastCreateRequest, onConsumeCreateRequest, tasks.lists.length]);
+  }, [createRequest, lastCreateRequest, onConsumeCreateRequest, primaryListId, tasks.loading]);
 
-  // Edit request from the dashboard focus card.
   useEffect(() => {
     if (editTaskId == null) return;
     const task = allTasksRef.current.find((item) => item.id === editTaskId);
@@ -112,33 +104,22 @@ export function TodoPage(props: TodoPageProps) {
     onConsumeEditRequest?.();
   }, [editTaskId, onConsumeEditRequest]);
 
-  const lists = tasks.lists;
-  const allTasks = tasks.tasks;
-  const allTasksRef = useRef(allTasks);
-  allTasksRef.current = allTasks;
-
-  const activeList = lists.find((list) => list.id === selectedListId) ?? null;
-  const effectiveListId = activeList ? activeList.id : null;
-
   const filtered = allTasks.filter((task) => {
-    if (effectiveListId !== null && task.listId !== effectiveListId) return false;
     if (completion === "open" && task.completedAt) return false;
     if (completion === "completed" && !task.completedAt) return false;
+    if (kindFilter !== "any" && task.kind !== kindFilter) return false;
     if (priorityFilter !== "any" && task.priority !== priorityFilter) return false;
     return true;
   });
+  const openCount = allTasks.filter((task) => !task.completedAt).length;
+  const completedCount = allTasks.length - openCount;
+  const overdueCount = allTasks.filter((task) => isOverdue(task.dueDate, task.completedAt)).length;
+  const pinnedTask = allTasks.find((task) => task.id === tasks.pinnedTaskId) ?? null;
 
-  function openCreateOnList(listId?: number) {
+  function openCreate() {
     setEditingTask(null);
     setSaveError("");
-    if (listId !== undefined) setSelectedListId(listId);
-    if (lists.length === 0) {
-      setCreateTaskAfterList(true);
-      setListName("");
-      setListDialog("create");
-      return;
-    }
-    setEditorOpen(true);
+    if (primaryListId) setEditorOpen(true);
   }
 
   function openEdit(task: TaskItem) {
@@ -152,293 +133,134 @@ export function TodoPage(props: TodoPageProps) {
       ? await tasks.updateTask(editingTask.id, input)
       : await tasks.createTask(input);
     if (result) {
-      // Completing semantics are separate; creating/editing keeps the pin.
       setEditorOpen(false);
       setEditingTask(null);
       setSaveError("");
     } else {
-      setSaveError(tasks.error || "Ellie couldn’t save the task. Try again.");
-    }
-  }
-
-  async function handleDeleteList() {
-    if (!listDeleteTarget) return;
-    setListDeleteLoading(true);
-    const ok = await tasks.deleteList(listDeleteTarget.id, listDeleteTarget.count);
-    setListDeleteLoading(false);
-    if (ok) {
-      setListDialog(null);
-      setListDeleteTarget(null);
-      if (selectedListId === listDeleteTarget.id) setSelectedListId(null);
-    } else {
-      // Count changed or storage failed; refresh preview to renew confirmation.
-      const preview = await desktop.taskListDeletePreview(listDeleteTarget.id);
-      if (preview) {
-        setListDeleteTarget({ ...listDeleteTarget, count: preview.taskCount });
-      }
+      setSaveError(tasks.error || "Ellie couldn’t save the task. Your draft is still here.");
     }
   }
 
   async function handleDeleteTask() {
     if (!deleteTask) return;
     setDeleteTaskLoading(true);
-    const ok = await tasks.deleteTask(deleteTask.id);
+    const deleted = await tasks.deleteTask(deleteTask.id);
     setDeleteTaskLoading(false);
-    if (ok) setDeleteTask(null);
+    if (deleted) setDeleteTask(null);
   }
 
   return (
     <div className="todo-page">
       <div className="todo-toolbar">
         <div className="todo-toolbar-title">
-          <p className="eyebrow">Local lists</p>
-          <h1 className="page-title">To-do</h1>
+          <p className="eyebrow">Private · saved on this PC</p>
+          <h1 className="page-title">My tasks</h1>
           <p className="page-sub">
-            {tasks.loading
-              ? "Loading your lists…"
-              : `${tasks.tasks.filter((task) => !task.completedAt).length} open · ${tasks.tasks.filter((task) => task.completedAt).length} completed · kept on this device`}
+            One quiet place for work, personal plans, due dates, and your current sticky note.
           </p>
         </div>
         <div className="todo-toolbar-actions">
-          <Button variant="primary" onClick={() => openCreateOnList()} disabled={!native || tasks.loading}>
+          <Button
+            variant="primary"
+            onClick={openCreate}
+            disabled={!native || tasks.loading || !primaryListId}
+          >
             <Plus size={15} />
             New task
           </Button>
         </div>
       </div>
 
-      <div className="todo-layout">
-        <aside className="todo-lists" aria-label="Task lists">
-          <div className="todo-lists-header">
-            <strong>Lists</strong>
-            <Button size="icon" variant="ghost" aria-label="Create list" disabled={!native} onClick={() => { setCreateTaskAfterList(false); setListName(""); setListDialog("create"); }}>
-              <FolderPlus size={15} />
+      <section className="todo-summary" aria-label="Task summary">
+        <div><strong>{openCount}</strong><span>Open</span></div>
+        <div><strong>{completedCount}</strong><span>Completed</span></div>
+        <div className={overdueCount ? "todo-summary-attention" : ""}>
+          <strong>{overdueCount}</strong><span>Overdue</span>
+        </div>
+        <div className={pinnedTask ? "todo-summary-pinned" : ""}>
+          <strong>{pinnedTask ? "1" : "0"}</strong><span>Sticky</span>
+        </div>
+      </section>
+
+      <main className="todo-main" aria-label="Tasks">
+        <div className="todo-filters" role="group" aria-label="Task filters">
+          <Select
+            label="Filter by completion"
+            value={completion}
+            onValueChange={setCompletion}
+            options={COMPLETION_OPTIONS}
+          />
+          <Select
+            label="Filter by task type"
+            value={kindFilter}
+            onValueChange={setKindFilter}
+            options={KIND_OPTIONS}
+          />
+          <Select
+            label="Filter by priority"
+            value={priorityFilter}
+            onValueChange={setPriorityFilter}
+            options={PRIORITY_FILTER_OPTIONS}
+          />
+        </div>
+
+        {tasks.error && (
+          <div className="page-alert" role="alert">
+            <span>{tasks.error}</span>
+            <Button size="sm" variant="ghost" onClick={() => void tasks.refresh()} disabled={tasks.loading}>
+              Retry
             </Button>
           </div>
-          <ul className="todo-list-nav">
-            <li>
-              <button
-                type="button"
-                className={!activeList ? "todo-list-item todo-list-active" : "todo-list-item"}
-                onClick={() => setSelectedListId(null)}
-              >
-                <span>All tasks</span>
-                <span className="todo-list-count">{tasks.tasks.length}</span>
-              </button>
-            </li>
-            {lists.map((list) => (
-              <li key={list.id} className="todo-list-row">
-                <button
-                  type="button"
-                  className={activeList?.id === list.id ? "todo-list-item todo-list-active" : "todo-list-item"}
-                  onClick={() => setSelectedListId(list.id)}
-                >
-                  <span>{list.name}</span>
-                  <span className="todo-list-count">{list.taskCount}</span>
-                </button>
-                {activeList?.id === list.id && (
-                  <>
-                    <button
-                      type="button"
-                      className="list-delete-btn"
-                      aria-label="Delete list"
-                      onClick={() => {
-                        setListName("");
-                        void desktop.taskListDeletePreview(list.id).then((preview) => {
-                          setListDeleteTarget({ id: list.id, name: list.name, count: preview.taskCount });
-                        });
-                        setListDialog("delete");
-                      }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                    <Menu
-                      label="More list actions"
-                      align="end"
-                      items={[
-                        {
-                          label: "Rename list",
-                          icon: <Pencil size={13} />,
-                          onSelect: () => {
-                            setListName(list.name);
-                            setListDialog("rename");
-                          },
-                        },
-                        {
-                          label: "Delete list…",
-                          danger: true,
-                          icon: <Trash2 size={13} />,
-                          onSelect: () => setListDeleteTarget({ id: list.id, name: list.name, count: list.taskCount }),
-                        },
-                      ]}
-                    />
-                  </>
-                )}
-              </li>
-            ))}
-            {lists.length === 0 && !tasks.loading && (
-              <li className="todo-lists-empty">No lists yet. Create one to start.</li>
-            )}
-          </ul>
-        </aside>
+        )}
 
-        <main className="todo-main" aria-label="Tasks">
-          <div className="todo-filters" role="group" aria-label="Task filters">
-            <Select
-              label="Filter by completion"
-              value={completion}
-              onValueChange={setCompletion}
-              options={COMPLETION_OPTIONS}
-            />
-            <Select
-              label="Filter by priority"
-              value={priorityFilter}
-              onValueChange={(value) => setPriorityFilter(value as TaskPriority | "any")}
-              options={PRIORITY_FILTER_OPTIONS}
-            />
-            {activeList && (
-              <Button size="sm" variant="ghost" onClick={() => openCreateOnList(activeList.id)} disabled={!native}>
+        {tasks.loading ? (
+          <Spinner label="Opening your local task board…" />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<ListChecks size={19} />}
+            title={allTasks.length === 0 ? "Your task board is ready" : "No tasks match these filters"}
+          >
+            <p className="empty-state-text">
+              {allTasks.length === 0
+                ? "Add a task with details, a due date, and an optional GitHub repository."
+                : "Try another type, status, or priority filter."}
+            </p>
+            {allTasks.length === 0 && (
+              <Button size="sm" onClick={openCreate} disabled={!native || !primaryListId} className="empty-state-action">
                 <Plus size={13} />
-                Add to {activeList.name}
+                Add your first task
               </Button>
             )}
-          </div>
-
-          {tasks.error && (
-            <p className="page-alert" role="alert">
-              {tasks.error}
-            </p>
-          )}
-
-          {tasks.loading ? (
-            <Spinner label="Loading tasks…" />
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon={<CheckCircle2 size={18} />}
-              title={
-                allTasks.length === 0
-                  ? "No tasks yet"
-                  : "No tasks match these filters"
-              }
-            >
-              <p className="empty-state-text">
-                {allTasks.length === 0
-                  ? "Add your first task, or create a list to organize your work."
-                  : "Clear a filter to see more tasks."}
-              </p>
-              {allTasks.length === 0 && (
-                <Button size="sm" onClick={() => openCreateOnList()} disabled={!native} className="empty-state-action">
-                  {lists.length === 0 ? <FolderPlus size={13} /> : <SquarePen size={13} />}
-                  {lists.length === 0 ? "Create your first list" : "Add your first task"}
-                </Button>
-              )}
-            </EmptyState>
-          ) : (
-            <ul className="task-list">
-              {filtered.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  pinned={task.id === tasks.pinnedTaskId}
-                  native={native}
-                  busy={tasks.busy}
-                  onToggle={(completed) => void tasks.setCompleted(task.id, completed)}
-                  onEdit={() => openEdit(task)}
-                  onDelete={() => setDeleteTask(task)}
-                  onPin={() => void tasks.setPinned(task.id === tasks.pinnedTaskId ? null : task.id)}
-                />
-              ))}
-            </ul>
-          )}
-        </main>
-      </div>
+          </EmptyState>
+        ) : (
+          <ul className="task-list">
+            {filtered.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                pinned={task.id === tasks.pinnedTaskId}
+                native={native}
+                busy={tasks.busy}
+                onToggle={(completed) => void tasks.setCompleted(task.id, completed)}
+                onEdit={() => openEdit(task)}
+                onDelete={() => setDeleteTask(task)}
+                onPin={() => void tasks.setPinned(task.id === tasks.pinnedTaskId ? null : task.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </main>
 
       <TaskEditorDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
         task={editingTask}
-        lists={lists}
+        listId={primaryListId}
         repositories={repositories}
         saveError={saveError}
         onSave={saveTask}
         onClose={() => setEditingTask(null)}
       />
-
-      <ListDialog
-        dialog={listDialog}
-        native={native}
-        lists={lists}
-        target={activeList}
-        name={listName}
-        onNameChange={setListName}
-        onCreate={async () => {
-          const created = await tasks.createList(listName.trim());
-          if (created) {
-            setListDialog(null);
-            setListName("");
-            setSelectedListId(created.id);
-            if (createTaskAfterList) {
-              setCreateTaskAfterList(false);
-              setEditingTask(null);
-              setEditorOpen(true);
-            }
-          }
-        }}
-        onRename={async () => {
-          if (activeList && listName.trim()) {
-            const renamed = await tasks.renameList(activeList.id, listName.trim());
-            if (renamed) setListDialog(null);
-          }
-        }}
-        onOpenDelete={() => {
-          if (!activeList) return;
-          setListDialog("delete");
-          void desktop.taskListDeletePreview(activeList.id).then((preview) => {
-            setListDeleteTarget({ id: activeList.id, name: activeList.name, count: preview.taskCount });
-          });
-          setListName("");
-        }}
-        onClose={() => {
-          setCreateTaskAfterList(false);
-          setListDialog(null);
-        }}
-        busy={tasks.busy}
-        createError={tasks.error}
-      />
-
-      {listDeleteTarget && listDialog === "delete" && (
-        <Modal
-          open
-          onOpenChange={(open) => {
-            if (!open && !listDeleteLoading) setListDialog(null);
-          }}
-          title="Delete this list?"
-          description={`"${listDeleteTarget.name}" has ${listDeleteTarget.count} task${listDeleteTarget.count === 1 ? "" : "s"}. Deleting the list removes them too.`}
-          footer={
-            <>
-              {tasks.error && (
-                <p className="form-error" role="alert">
-                  {tasks.error}
-                </p>
-              )}
-              <ModalActions>
-                <Button variant="ghost" onClick={() => setListDialog(null)} disabled={listDeleteLoading}>
-                  Cancel
-                </Button>
-                <Button variant="danger" onClick={() => void handleDeleteList()} disabled={listDeleteLoading}>
-                  <Trash2 size={14} />
-                  {listDeleteLoading ? "Deleting…" : "Delete list"}
-                </Button>
-              </ModalActions>
-            </>
-          }
-        >
-          <p className="modal-note">
-            If the list changed since confirmation, Ellie asks you to confirm again —
-            it never deletes silent surprises.
-          </p>
-        </Modal>
-      )}
 
       {deleteTask && (
         <Modal
@@ -450,11 +272,7 @@ export function TodoPage(props: TodoPageProps) {
           description={deleteTask.title}
           footer={
             <>
-              {tasks.error && (
-                <p className="form-error" role="alert">
-                  {tasks.error}
-                </p>
-              )}
+              {tasks.error && <p className="form-error" role="alert">{tasks.error}</p>}
               <ModalActions>
                 <Button variant="ghost" onClick={() => setDeleteTask(null)} disabled={deleteTaskLoading}>
                   Cancel
@@ -467,9 +285,7 @@ export function TodoPage(props: TodoPageProps) {
             </>
           }
         >
-          <p className="modal-note">
-            If this is the pinned task, the pin is cleared automatically.
-          </p>
+          <p className="modal-note">Deleting a pinned task also closes its desktop sticky note.</p>
         </Modal>
       )}
     </div>
@@ -497,7 +313,7 @@ function TaskRow({
 }) {
   const overdue = isOverdue(task.dueDate, task.completedAt);
   return (
-    <li className={task.completedAt ? "task-row task-row-completed" : "task-row"}>
+    <li className={task.completedAt ? `task-row task-row-${task.kind} task-row-completed` : `task-row task-row-${task.kind}`}>
       <Checkbox
         checked={Boolean(task.completedAt)}
         onCheckedChange={onToggle}
@@ -509,9 +325,13 @@ function TaskRow({
           <button type="button" className="task-row-title" onClick={onEdit}>
             {task.title}
           </button>
+          <span className={`task-kind-chip task-kind-${task.kind}`}>
+            {task.kind === "work" ? <BriefcaseBusiness size={10} /> : <Heart size={10} />}
+            {task.kind === "work" ? "Work" : "Personal"}
+          </span>
           {pinned && (
             <Badge tone="accent" className="task-pinned-badge">
-              <Pin size={10} /> Focus
+              <Pin size={10} /> Sticky
             </Badge>
           )}
         </div>
@@ -524,158 +344,45 @@ function TaskRow({
               {overdue && " · overdue"}
             </span>
           )}
-          {task.repository && (
-            <a
-              className="task-repo-link"
-              href={task.repository.htmlUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => event.stopPropagation()}
-            >
-              {task.repository.fullName}
-            </a>
-          )}
+          {task.repository && <span className="task-repo-link">{task.repository.fullName}</span>}
         </div>
         {task.notes && <p className="task-row-notes">{task.notes}</p>}
       </div>
-      <Menu
-        label={`Actions for ${task.title}`}
-        items={[
-          {
-            label: task.completedAt ? "Reopen task" : "Mark complete",
-            icon: <CheckCircle2 size={14} />,
-            onSelect: () => onToggle(!task.completedAt),
-            disabled: busy || !native,
-          },
-          {
-            label: pinned ? "Unpin from Focus" : "Pin to Focus",
-            icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
-            onSelect: onPin,
-            disabled: busy || !native || Boolean(task.completedAt),
-          },
-          {
-            label: "Edit",
-            icon: <Pencil size={14} />,
-            onSelect: onEdit,
-          },
-          {
-            label: "Delete",
-            icon: <Trash2 size={14} />,
-            danger: true,
-            onSelect: onDelete,
-          },
-        ]}
-      />
+      <div className="task-row-actions">
+        <button
+          type="button"
+          className={pinned ? "task-pin-button task-pin-button-active" : "task-pin-button"}
+          aria-label={pinned ? `Unpin ${task.title} sticky note` : `Pin ${task.title} as sticky note`}
+          aria-pressed={pinned}
+          title={pinned ? "Unpin sticky note" : "Pin as sticky note"}
+          onClick={onPin}
+          disabled={busy || !native || Boolean(task.completedAt)}
+        >
+          {pinned ? <PinOff size={14} /> : <Pin size={14} />}
+        </button>
+        <Menu
+          label={`Actions for ${task.title}`}
+          items={[
+            {
+              label: task.completedAt ? "Reopen task" : "Mark complete",
+              icon: <CheckCircle2 size={14} />,
+              onSelect: () => onToggle(!task.completedAt),
+              disabled: busy || !native,
+            },
+            {
+              label: "Edit",
+              icon: <Pencil size={14} />,
+              onSelect: onEdit,
+            },
+            {
+              label: "Delete",
+              icon: <Trash2 size={14} />,
+              danger: true,
+              onSelect: onDelete,
+            },
+          ]}
+        />
+      </div>
     </li>
   );
-}
-
-function ListDialog({
-  dialog,
-  native,
-  lists,
-  target,
-  name,
-  onNameChange,
-  onCreate,
-  onRename,
-  onOpenDelete,
-  onClose,
-  busy,
-  createError,
-}: {
-  dialog: "create" | "rename" | "delete" | null;
-  native: boolean;
-  lists: Array<{ id: number; name: string }>;
-  target: { id: number; name: string } | null;
-  name: string;
-  onNameChange: (value: string) => void;
-  onCreate: () => void;
-  onRename: () => void;
-  onOpenDelete: () => void;
-  onClose: () => void;
-  busy: boolean;
-  createError: string;
-}) {
-  if (dialog !== "create" && dialog !== "rename") return null;
-  const isCreate = dialog === "create";
-  const conflict = lists.some(
-    (list) => list.name.toLowerCase() === name.trim().toLowerCase() && list.id !== target?.id,
-  );
-  return (
-    <Modal
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      title={isCreate ? "Create a list" : "Rename list"}
-      description={isCreate ? "Lists keep related tasks together." : target?.name}
-      footer={
-        <>
-          {createError && (
-            <p className="form-error" role="alert">
-              {createError}
-            </p>
-          )}
-          <ModalActions>
-            <Button variant="ghost" onClick={onClose} disabled={busy}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!name.trim() || conflict || busy || !native}
-              onClick={() => (isCreate ? onCreate() : onRename())}
-            >
-              {busy ? "Saving…" : isCreate ? "Create list" : "Rename"}
-            </Button>
-            {!isCreate && (
-              <Menu
-                label="More list actions"
-                items={[
-                  {
-                    label: "Delete list…",
-                    danger: true,
-                    icon: <Trash2 size={14} />,
-                    onSelect: onOpenDelete,
-                  },
-                ]}
-              />
-            )}
-          </ModalActions>
-        </>
-      }
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (isCreate) onCreate();
-          else onRename();
-        }}
-      >
-        <Field label="List name">
-          <input
-            className="input"
-            value={name}
-            onChange={(event) => onNameChange(event.target.value)}
-            placeholder="e.g. Workspace, Errands, Ideas"
-            autoFocus
-            maxLength={80}
-            required
-          />
-        </Field>
-        {conflict && (
-          <p className="form-error" role="alert">
-            A list with that name already exists.
-          </p>
-        )}
-      </form>
-    </Modal>
-  );
-}
-
-/** Stable helper: the first repo to suggest in the task editor. */
-export function firstRepository(
-  repositories: Array<{ id: number; fullName: string }>,
-): { id: number; fullName: string } | null {
-  return repositories[0] ?? null;
 }

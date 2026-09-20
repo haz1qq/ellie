@@ -25,6 +25,7 @@ vi.mock("./lib/desktop", () => ({
     deleteProviderKey: vi.fn(),
     providerKeyStatus: vi.fn(),
     onProvidersUpdated: vi.fn(),
+    onTasksUpdated: vi.fn(),
     refreshAll: vi.fn(),
     refreshProvider: vi.fn(),
     githubConnectionStatus: vi.fn(),
@@ -182,6 +183,7 @@ const taskFixtures = {
       listId: 1,
       title: "Ship the dashboard",
       notes: null,
+      kind: "work" as const,
       priority: "high" as const,
       dueDate: "2026-09-20",
       repository: null,
@@ -211,6 +213,7 @@ beforeEach(() => {
   vi.mocked(desktop.getAnalytics).mockResolvedValue(emptyAnalytics);
   vi.mocked(desktop.onNavigate).mockResolvedValue(() => {});
   vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
+  vi.mocked(desktop.onTasksUpdated).mockResolvedValue(() => {});
   vi.mocked(desktop.refreshAll).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
   vi.mocked(desktop.refreshProvider).mockResolvedValue({ providers: demoProviders, refreshed: true, busy: false });
   vi.mocked(desktop.githubConnectionStatus).mockResolvedValue(disconnectedStatus);
@@ -228,6 +231,7 @@ beforeEach(() => {
     completedAt: completed ? "2026-09-08T10:00:00Z" : null,
     id: taskId,
   }));
+  vi.mocked(desktop.taskSetPinned).mockImplementation(async (taskId) => taskId);
   vi.mocked(desktop.bootstrap).mockResolvedValue({
     settings: initial,
     view: "dashboard",
@@ -255,11 +259,17 @@ describe("shell and navigation", () => {
   it("navigates between all views and marks the active page", async () => {
     const user = userEvent.setup();
     await renderApp();
-    for (const name of ["AI Usage", "GitHub", "To-do", "History", "Settings"]) {
+    for (const [name, heading] of [
+      ["AI Usage", "AI Usage"],
+      ["GitHub", "GitHub"],
+      ["To-do", "My tasks"],
+      ["History", "History"],
+      ["Settings", "Settings"],
+    ]) {
       const nav = screen.getByRole("button", { name });
       await user.click(nav);
       expect(nav).toHaveAttribute("aria-current", "page");
-      expect(screen.getByRole("heading", { name })).toBeVisible();
+      expect(screen.getByRole("heading", { name: heading })).toBeVisible();
     }
     await user.click(screen.getByRole("button", { name: "Overview" }));
     expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
@@ -497,6 +507,18 @@ describe("to-do workflows", () => {
     await waitFor(() => expect(desktop.taskSetCompleted).toHaveBeenCalledWith(11, true));
   });
 
+  it("pins an open task as the desktop sticky note", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue({
+      ...taskFixtures,
+      pinnedTaskId: null,
+    });
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    await user.click(await screen.findByRole("button", { name: "Pin Ship the dashboard as sticky note" }));
+    await waitFor(() => expect(desktop.taskSetPinned).toHaveBeenCalledWith(11));
+  });
+
   it("creates a task from the new-task dialog", async () => {
     vi.mocked(desktop.taskBootstrap).mockResolvedValue({ lists: taskFixtures.lists as never, tasks: [], pinnedTaskId: null });
     vi.mocked(desktop.taskCreate).mockResolvedValue({ ...taskFixtures.tasks[0]!, id: 12 });
@@ -504,56 +526,46 @@ describe("to-do workflows", () => {
     await renderApp();
     await user.click(screen.getByRole("button", { name: "To-do" }));
     await user.click(await screen.findByRole("button", { name: "New task" }));
-    await user.type(await screen.findByLabelText("Title"), "Write tests");
+    await user.type(await screen.findByLabelText("Task name"), "Write tests");
     await user.click(screen.getByRole("button", { name: "Add task" }));
     await waitFor(() => expect(desktop.taskCreate).toHaveBeenCalled());
-    expect(desktop.taskCreate).toHaveBeenCalledWith(expect.objectContaining({ title: "Write tests" }));
+    expect(desktop.taskCreate).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Write tests",
+      kind: "personal",
+      listId: 1,
+      repository: null,
+    }));
   });
 
-  it("deletes a list only after reporting the affected task count", async () => {
-    vi.mocked(desktop.taskBootstrap)
-      .mockResolvedValueOnce({
-        lists: taskFixtures.lists as never,
-        tasks: taskFixtures.tasks as never,
-        pinnedTaskId: null,
-      })
-      .mockResolvedValue({ lists: [], tasks: [], pinnedTaskId: null });
-    vi.mocked(desktop.taskListDeletePreview).mockResolvedValue({ listId: 1, taskCount: 1 });
-    vi.mocked(desktop.taskDeleteList).mockResolvedValue(undefined);
-    const user = userEvent.setup();
-    await renderApp();
-    await user.click(screen.getByRole("button", { name: "To-do" }));
-    await user.click(await screen.findByRole("button", { name: /^Focus/ }));
-    await user.click(await screen.findByLabelText("Delete list"));
-    expect(await screen.findByText(/"Focus" has 1 task/)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Delete list" }));
-    await waitFor(() => expect(desktop.taskDeleteList).toHaveBeenCalledWith(1, 1));
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^Focus/ })).not.toBeInTheDocument(),
-    );
-  });
-
-  it("creates a first list before opening the first task editor", async () => {
-    const createdList = {
-      id: 2,
-      name: "Personal",
-      taskCount: 0,
-      createdAt: "2026-09-18T00:00:00Z",
-      updatedAt: "2026-09-18T00:00:00Z",
-    };
-    vi.mocked(desktop.taskBootstrap)
-      .mockResolvedValueOnce({ lists: [], tasks: [], pinnedTaskId: null })
-      .mockResolvedValue({ lists: [createdList], tasks: [], pinnedTaskId: null });
-    vi.mocked(desktop.taskCreateList).mockResolvedValue(createdList);
+  it("stores an explicit work type without requiring a repository", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue({ lists: taskFixtures.lists as never, tasks: [], pinnedTaskId: null });
+    vi.mocked(desktop.taskCreate).mockResolvedValue({ ...taskFixtures.tasks[0]!, id: 12 });
     const user = userEvent.setup();
     await renderApp();
     await user.click(screen.getByRole("button", { name: "To-do" }));
     await user.click(await screen.findByRole("button", { name: "New task" }));
-    expect(await screen.findByRole("heading", { name: "Create a list" })).toBeVisible();
-    await user.type(screen.getByLabelText("List name"), "Personal");
-    await user.click(screen.getByRole("button", { name: "Create list" }));
+    await user.click(screen.getByRole("radio", { name: /Work/ }));
+    await user.type(screen.getByLabelText("Task name"), "Redesign Ellie");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(desktop.taskCreate).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Redesign Ellie",
+      kind: "work",
+      repository: null,
+    })));
+  });
+
+  it("uses one Rust-created task board without list setup controls", async () => {
+    vi.mocked(desktop.taskBootstrap).mockResolvedValue({ lists: taskFixtures.lists as never, tasks: [], pinnedTaskId: null });
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(screen.getByRole("button", { name: "To-do" }));
+    expect(await screen.findByRole("heading", { name: "My tasks" })).toBeVisible();
+    expect(screen.queryByText("Create a list")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Task lists")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New task" }));
     expect(await screen.findByRole("heading", { name: "New task" })).toBeVisible();
-    expect(screen.getByLabelText("Title")).toBeEnabled();
+    expect(screen.getByLabelText("Task name")).toBeEnabled();
+    expect(screen.queryByLabelText("List")).not.toBeInTheDocument();
   });
 
   it("allows editing a task whose due date is already overdue", async () => {

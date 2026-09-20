@@ -8,6 +8,7 @@ const handler = read("src-tauri/src/lib.rs");
 const desktop = read("src/lib/desktop.ts");
 const capability = JSON.parse(read("src-tauri/capabilities/main.json"));
 const miniCapability = JSON.parse(read("src-tauri/capabilities/mini.json"));
+const taskNoteCapability = JSON.parse(read("src-tauri/capabilities/task-note.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
 const githubCommands = [
   "github_connection_status",
@@ -22,6 +23,11 @@ const githubCommands = [
   "github_confirm_repository_creation",
   "github_repository_creation_status",
   "github_resolve_repository_creation",
+];
+const taskNoteCommands = [
+  "task_note_bootstrap",
+  "task_note_complete",
+  "task_note_unpin",
 ];
 
 // Mocked invoke calls cannot catch missing native permissions. Keep all
@@ -61,7 +67,7 @@ describe("credential IPC permissions", () => {
   );
 
   it("keeps access scoped to the local main window", () => {
-    expect(config.app.security.capabilities).toEqual(["main", "mini"]);
+    expect(config.app.security.capabilities).toEqual(["main", "mini", "task-note"]);
     expect(capability.identifier).toBe("main");
     expect(capability.windows).toEqual(["main"]);
     expect(capability.remote).toBeUndefined();
@@ -126,6 +132,47 @@ describe("credential IPC permissions", () => {
       );
     },
   );
+
+  it.each(taskNoteCommands)(
+    "aligns sticky-note-only %s across IPC declarations",
+    (command) => {
+      expect(desktop).toContain(`"${command}"`);
+      expect(handler).toContain(`commands::${command}`);
+      const commands = manifest.match(/\.commands\(&\[([\s\S]*?)\]\)/)?.[1];
+      expect(commands).toContain(`"${command}"`);
+      const permission = `allow-${command.replaceAll("_", "-")}`;
+      expect(taskNoteCapability.permissions).toContain(permission);
+      expect(capability.permissions).not.toContain(permission);
+      expect(miniCapability.permissions).not.toContain(permission);
+    },
+  );
+
+  it("keeps the sticky note on a least-privilege command boundary", () => {
+    expect(taskNoteCapability.identifier).toBe("task-note");
+    expect(taskNoteCapability.windows).toEqual(["task-note"]);
+    expect(taskNoteCapability.remote).toBeUndefined();
+    expect(taskNoteCapability.permissions).toEqual([
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
+      "core:window:allow-start-dragging",
+      "allow-open-main-window",
+      "allow-task-note-bootstrap",
+      "allow-task-note-complete",
+      "allow-task-note-unpin",
+    ]);
+    for (const forbidden of [
+      "allow-get-bootstrap",
+      "allow-task-bootstrap",
+      "allow-task-create",
+      "allow-task-update",
+      "allow-task-delete",
+      "allow-task-set-pinned",
+      "allow-github-connection-status",
+      "allow-save-provider-key",
+    ]) {
+      expect(taskNoteCapability.permissions).not.toContain(forbidden);
+    }
+  });
 
   it("keeps the mini bar on a least-privilege command boundary", () => {
     expect(miniCapability.identifier).toBe("mini");

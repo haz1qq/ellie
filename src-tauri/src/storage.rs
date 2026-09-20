@@ -1,10 +1,10 @@
-use std::{path::Path, time::Duration};
+use std::{collections::HashSet, path::Path, time::Duration};
 
 use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 17;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -22,6 +22,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0012_github_connection.sql"),
     include_str!("../migrations/0013_workspace_tasks.sql"),
     include_str!("../migrations/0014_github_repository_creation.sql"),
+    include_str!("../migrations/0015_workspace_task_list_repair.sql"),
+    include_str!("../migrations/0016_workspace_task_kind.sql"),
+    include_str!("../migrations/0017_workspace_task_sticky_note.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -49,6 +52,12 @@ pub fn initialize(path: &Path) -> Result<Settings, AppError> {
     if version < SCHEMA_VERSION {
         let mut current = version;
         for migration in &MIGRATIONS[current as usize..] {
+            // A development build applied schema 13 before task_lists.name_key
+            // was finalized. Repair those databases before schema 15 creates
+            // the unique index; fresh databases already have the column.
+            if current == 14 {
+                repair_legacy_workspace_task_lists(&transaction)?;
+            }
             transaction.execute_batch(migration)?;
             current += 1;
             tracing::info!(event = "schema_migrated", to = current);
@@ -57,6 +66,67 @@ pub fn initialize(path: &Path) -> Result<Settings, AppError> {
     }
     transaction.commit()?;
     read_settings_from(&connection)
+}
+
+fn repair_legacy_workspace_task_lists(connection: &Connection) -> Result<(), AppError> {
+    let has_name_key = {
+        let mut statement = connection.prepare("PRAGMA table_info(task_lists)")?;
+        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for column in columns {
+            if column? == "name_key" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if has_name_key {
+        return Ok(());
+    }
+
+    connection.execute("ALTER TABLE task_lists ADD COLUMN name_key TEXT", [])?;
+    let lists = {
+        let mut statement = connection.prepare("SELECT id, name FROM task_lists ORDER BY id")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut used = HashSet::new();
+    for (id, name) in &lists {
+        let base = {
+            let normalized = name.trim().to_lowercase();
+            if normalized.is_empty() {
+                format!("list-{id}")
+            } else {
+                normalized
+            }
+        };
+        let mut attempt = 0_u64;
+        let name_key = loop {
+            let candidate = match attempt {
+                0 => base.clone(),
+                1 => format!("{base}#{id}"),
+                _ => format!("{base}#{id}-{attempt}"),
+            };
+            if used.insert(candidate.clone()) {
+                break candidate;
+            }
+            attempt = attempt.saturating_add(1);
+        };
+        connection.execute(
+            "UPDATE task_lists SET name_key = ?1 WHERE id = ?2",
+            params![name_key, id],
+        )?;
+    }
+
+    tracing::info!(
+        event = "workspace_task_list_schema_repaired",
+        list_count = lists.len()
+    );
+    Ok(())
 }
 
 pub fn read_settings(path: &Path) -> Result<Settings, AppError> {
@@ -574,6 +644,98 @@ mod tests {
             )?,
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn schema_14_upgrade_repairs_legacy_task_lists_without_losing_data(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("ellie.sqlite3");
+        let connection = connect(&path)?;
+        for migration in &MIGRATIONS[..12] {
+            connection.execute_batch(migration)?;
+        }
+        let legacy_tasks = include_str!("../migrations/0013_workspace_tasks.sql")
+            .lines()
+            .filter(|line| !line.contains("name_key TEXT"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        connection.execute_batch(&legacy_tasks)?;
+        connection.execute_batch(MIGRATIONS[13])?;
+        connection.pragma_update(None, "user_version", 14)?;
+        let now = "2026-01-02T03:04:05.000Z";
+        connection.execute(
+            "INSERT INTO task_lists (name, created_at, updated_at) VALUES (?1, ?2, ?2)",
+            params!["Work", now],
+        )?;
+        let first_list = connection.last_insert_rowid();
+        connection.execute(
+            "INSERT INTO task_lists (name, created_at, updated_at) VALUES (?1, ?2, ?2)",
+            params!["work", now],
+        )?;
+        let second_list = connection.last_insert_rowid();
+        connection.execute(
+            "INSERT INTO tasks
+                (list_id, title, notes, priority, due_date, repository_id,
+                 repository_full_name, completed_at, created_at, updated_at)
+             VALUES (?1, 'Preserve me', NULL, 'none', NULL, NULL, NULL, NULL, ?2, ?2)",
+            params![first_list, now],
+        )?;
+        connection.execute(
+            "INSERT INTO tasks
+                (list_id, title, notes, priority, due_date, repository_id,
+                 repository_full_name, completed_at, created_at, updated_at)
+             VALUES (?1, 'Linked work', NULL, 'high', NULL, 42,
+                     'octo-cat/ellie', NULL, ?2, ?2)",
+            params![second_list, now],
+        )?;
+        drop(connection);
+
+        initialize(&path)?;
+        let connection = connect(&path)?;
+        assert_eq!(
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            SCHEMA_VERSION
+        );
+        let columns = {
+            let mut statement = connection.prepare("PRAGMA table_info(task_lists)")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        assert!(columns.iter().any(|column| column == "name_key"));
+        let keys = {
+            let mut statement =
+                connection.prepare("SELECT name_key FROM task_lists ORDER BY id")?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        assert_eq!(keys.len(), 2);
+        assert!(keys.iter().all(|key| !key.is_empty()));
+        assert_ne!(keys[0], keys[1]);
+        assert!(connection
+            .execute(
+                "INSERT INTO task_lists (name, created_at, updated_at) VALUES (?1, ?2, ?2)",
+                params!["Missing key", now],
+            )
+            .is_err());
+        drop(connection);
+
+        let bootstrap = crate::tasks::TaskService::new(path).bootstrap()?;
+        assert_eq!(bootstrap.lists.len(), 2);
+        assert_eq!(bootstrap.tasks.len(), 2);
+        let personal = bootstrap
+            .tasks
+            .iter()
+            .find(|task| task.title == "Preserve me")
+            .expect("personal task");
+        assert_eq!(personal.kind, crate::tasks::TaskKind::Personal);
+        let work = bootstrap
+            .tasks
+            .iter()
+            .find(|task| task.title == "Linked work")
+            .expect("work task");
+        assert_eq!(work.kind, crate::tasks::TaskKind::Work);
         Ok(())
     }
 

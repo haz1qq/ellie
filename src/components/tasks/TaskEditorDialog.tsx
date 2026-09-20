@@ -1,5 +1,11 @@
+import { BriefcaseBusiness, Heart } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { TaskItem, TaskInput, TaskPriority } from "../../lib/desktop";
+import type {
+  TaskItem,
+  TaskInput,
+  TaskKind,
+  TaskPriority,
+} from "../../lib/desktop";
 import { Button } from "../ui/Button";
 import { Field, Select } from "../ui/Select";
 import { Modal, ModalActions } from "../ui/Modal";
@@ -16,8 +22,8 @@ export interface TaskEditorProps {
   onOpenChange: (open: boolean) => void;
   /** null = create; otherwise edit. */
   task: TaskItem | null;
-  /** Default list for new tasks. */
-  lists: Array<{ id: number; name: string; taskCount: number }>;
+  /** Rust-owned internal list used by Ellie's single task board. */
+  listId: number | null;
   repositories: Array<{ id: number; fullName: string }>;
   /** Friendly error shown after a failed save; draft is preserved. */
   saveError: string;
@@ -25,23 +31,20 @@ export interface TaskEditorProps {
   onClose: () => void;
 }
 
-/**
- * Create/edit task dialog. On save failure the parent keeps the current draft
- * inputs and shows `saveError`, then re-renders this dialog with state intact.
- */
+/** Create/edit dialog for Ellie's single local task board. */
 export function TaskEditorDialog({
   open,
   onOpenChange,
   task,
-  lists,
+  listId,
   repositories,
   saveError,
   onSave,
   onClose,
 }: TaskEditorProps) {
-  const [listId, setListId] = useState<number>(0);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  const [kind, setKind] = useState<TaskKind>("personal");
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [dueDate, setDueDate] = useState("");
   const [repositoryId, setRepositoryId] = useState<number>(0);
@@ -49,36 +52,39 @@ export function TaskEditorDialog({
 
   useEffect(() => {
     if (!open) return;
-    const defaultList = lists[0];
-    setListId(task?.listId ?? defaultList?.id ?? 0);
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
+    setKind(task?.kind ?? "personal");
     setPriority(task?.priority ?? "none");
     setDueDate(task?.dueDate ?? "");
     setRepositoryId(task?.repository?.repositoryId ?? 0);
     setSaving(false);
-  }, [open, task, lists]);
+  }, [open, task]);
 
-  const repositoryOptions = [
-    ...repositories.map((repo) => ({ value: String(repo.id), label: repo.fullName })),
-  ];
+  function chooseKind(next: TaskKind) {
+    setKind(next);
+    if (next === "personal") setRepositoryId(0);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!listId || !title.trim() || saving) return;
     setSaving(true);
-    await onSave({
-      listId,
-      title: title.trim(),
-      notes: notes.trim() ? notes : null,
-      priority,
-      dueDate: dueDate || null,
-      repository: repositoryId
+    const repository =
+      kind === "work" && repositoryId
         ? (() => {
             const repo = repositories.find((item) => item.id === repositoryId);
             return repo ? { repositoryId: repo.id, fullName: repo.fullName } : null;
           })()
-        : null,
+        : null;
+    await onSave({
+      listId: task?.listId ?? listId,
+      title: title.trim(),
+      notes: notes.trim() ? notes : null,
+      kind,
+      priority,
+      dueDate: dueDate || null,
+      repository,
     });
     setSaving(false);
   }
@@ -91,11 +97,7 @@ export function TaskEditorDialog({
       onOpenChange={onOpenChange}
       onClose={onClose}
       title={task ? "Edit task" : "New task"}
-      description={
-        task
-          ? "Save changes locally on this device."
-          : "Tasks live locally — no account or sync required."
-      }
+      description="Saved privately in Ellie's local database on this PC."
       width="lg"
       footer={
         <>
@@ -113,7 +115,7 @@ export function TaskEditorDialog({
       }
     >
       <form id="task-editor-form" onSubmit={(event) => void submit(event)} className="task-editor-form">
-        <Field label="Title">
+        <Field label="Task name">
           <input
             className="input"
             value={title}
@@ -124,35 +126,43 @@ export function TaskEditorDialog({
             required
           />
         </Field>
-        <Field label="Notes">
+        <Field label="Task details">
           <textarea
             className="input textarea"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="Optional context, kept on this device"
-            rows={3}
+            placeholder="Notes, context, or the next step"
+            rows={4}
             maxLength={4000}
           />
         </Field>
-        <div className="task-editor-grid">
-          <Field label="List">
-            <Select
-              label="List"
-              value={String(listId)}
-              onValueChange={(value) => setListId(Number(value))}
-              options={lists.map((list) => ({ value: String(list.id), label: list.name }))}
-              placeholder="Choose a list"
-            />
-          </Field>
-          <Field label="Priority">
-            <Select
-              label="Priority"
-              value={priority}
-              onValueChange={(value) => setPriority(value)}
-              options={PRIORITY_OPTIONS}
-            />
-          </Field>
-        </div>
+
+        <fieldset className="task-kind-field">
+          <legend className="field-label">Task type</legend>
+          <div className="task-kind-picker" role="radiogroup" aria-label="Task type">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={kind === "work"}
+              className={kind === "work" ? "task-kind-option task-kind-option-active" : "task-kind-option"}
+              onClick={() => chooseKind("work")}
+            >
+              <BriefcaseBusiness size={16} />
+              <span><strong>Work</strong><small>Optionally link a GitHub repository</small></span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={kind === "personal"}
+              className={kind === "personal" ? "task-kind-option task-kind-option-active" : "task-kind-option"}
+              onClick={() => chooseKind("personal")}
+            >
+              <Heart size={16} />
+              <span><strong>Personal</strong><small>Learning, life, errands, or anything else</small></span>
+            </button>
+          </div>
+        </fieldset>
+
         <div className="task-editor-grid">
           <Field label="Due date">
             <input
@@ -163,22 +173,33 @@ export function TaskEditorDialog({
               aria-label="Due date"
             />
           </Field>
-          <Field label="Repository link">
+          <Field label="Priority">
             <Select
-              label="Repository link"
+              label="Priority"
+              value={priority}
+              onValueChange={setPriority}
+              options={PRIORITY_OPTIONS}
+            />
+          </Field>
+        </div>
+
+        {kind === "work" && (
+          <Field label="GitHub repository (optional)">
+            <Select
+              label="GitHub repository"
               value={repositoryId ? String(repositoryId) : "0"}
               onValueChange={(value) => setRepositoryId(Number(value))}
               options={[
                 { value: "0", label: "No repository" },
-                ...repositoryOptions,
+                ...repositories.map((repo) => ({ value: String(repo.id), label: repo.fullName })),
               ]}
               placeholder="Choose a repository"
             />
           </Field>
-        </div>
-        {repositories.length === 0 && (
+        )}
+        {kind === "work" && repositories.length === 0 && (
           <p className="form-hint">
-            Loaded GitHub repositories appear here. Connect GitHub to link a task to a repository.
+            Connect GitHub and load repositories to attach one. You can still save this work task now.
           </p>
         )}
       </form>

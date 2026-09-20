@@ -105,6 +105,31 @@ impl TaskPriority {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskKind {
+    Work,
+    #[default]
+    Personal,
+}
+
+impl TaskKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Work => "work",
+            Self::Personal => "personal",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, TaskError> {
+        match value {
+            "work" => Ok(Self::Work),
+            "personal" => Ok(Self::Personal),
+            _ => Err(TaskError::storage()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRepositoryInput {
@@ -137,6 +162,7 @@ pub struct TaskItem {
     pub list_id: i64,
     pub title: String,
     pub notes: Option<String>,
+    pub kind: TaskKind,
     pub priority: TaskPriority,
     pub due_date: Option<String>,
     pub repository: Option<TaskRepositoryLink>,
@@ -153,6 +179,12 @@ pub struct TaskBootstrap {
     pub pinned_task_id: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TaskNoteSnapshot {
+    pub task: Option<TaskItem>,
+    pub position: Option<(i32, i32)>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListDeletePreview {
@@ -166,6 +198,8 @@ pub struct TaskInput {
     pub list_id: i64,
     pub title: String,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub kind: TaskKind,
     #[serde(default)]
     pub priority: TaskPriority,
     pub due_date: Option<String>,
@@ -203,12 +237,18 @@ impl TaskService {
     }
 
     pub fn bootstrap(&self) -> Result<TaskBootstrap, TaskError> {
-        let connection = self.connect()?;
-        Ok(TaskBootstrap {
-            lists: read_lists(&connection)?,
-            tasks: read_tasks(&connection, &TaskQuery::default())?,
-            pinned_task_id: read_pinned_task_id(&connection)?,
-        })
+        let mut connection = self.connect()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| TaskError::storage())?;
+        ensure_default_list(&transaction)?;
+        let bootstrap = TaskBootstrap {
+            lists: read_lists(&transaction)?,
+            tasks: read_tasks(&transaction, &TaskQuery::default())?,
+            pinned_task_id: read_pinned_task_id(&transaction)?,
+        };
+        transaction.commit().map_err(|_| TaskError::storage())?;
+        Ok(bootstrap)
     }
 
     pub fn list_tasks(&self, query: TaskQuery) -> Result<Vec<TaskItem>, TaskError> {
@@ -306,13 +346,14 @@ impl TaskService {
         transaction
             .execute(
                 "INSERT INTO tasks
-                    (list_id, title, notes, priority, due_date, repository_id,
+                    (list_id, title, notes, task_kind, priority, due_date, repository_id,
                      repository_full_name, completed_at, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?9)",
                 params![
                     input.list_id,
                     input.title,
                     input.notes,
+                    input.kind.as_str(),
                     input.priority.as_str(),
                     input.due_date,
                     repository_id,
@@ -340,14 +381,15 @@ impl TaskService {
         let changed = transaction
             .execute(
                 "UPDATE tasks
-                 SET list_id = ?1, title = ?2, notes = ?3, priority = ?4,
-                     due_date = ?5, repository_id = ?6, repository_full_name = ?7,
-                     updated_at = ?8
-                 WHERE id = ?9",
+                 SET list_id = ?1, title = ?2, notes = ?3, task_kind = ?4, priority = ?5,
+                     due_date = ?6, repository_id = ?7, repository_full_name = ?8,
+                     updated_at = ?9
+                 WHERE id = ?10",
                 params![
                     input.list_id,
                     input.title,
                     input.notes,
+                    input.kind.as_str(),
                     input.priority.as_str(),
                     input.due_date,
                     repository_id,
@@ -442,6 +484,73 @@ impl TaskService {
         Ok(task_id)
     }
 
+    pub fn pinned_task(&self) -> Result<Option<TaskItem>, TaskError> {
+        Ok(self.task_note_snapshot()?.task)
+    }
+
+    pub fn complete_pinned(&self) -> Result<TaskItem, TaskError> {
+        let mut connection = self.connect()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| TaskError::storage())?;
+        let task_id = read_pinned_task_id(&transaction)?.ok_or_else(TaskError::not_found)?;
+        let now = utc_now();
+        let changed = transaction
+            .execute(
+                "UPDATE tasks SET completed_at = ?1, updated_at = ?1 WHERE id = ?2",
+                params![now, task_id],
+            )
+            .map_err(|_| TaskError::storage())?;
+        if changed != 1 {
+            return Err(TaskError::not_found());
+        }
+        transaction
+            .execute(
+                "UPDATE workspace_task_state SET pinned_task_id = NULL WHERE id = 1",
+                [],
+            )
+            .map_err(|_| TaskError::storage())?;
+        let task = read_task(&transaction, task_id)?;
+        transaction.commit().map_err(|_| TaskError::storage())?;
+        Ok(task)
+    }
+
+    pub(crate) fn task_note_snapshot(&self) -> Result<TaskNoteSnapshot, TaskError> {
+        let connection = self.connect()?;
+        let (task_id, x, y): (Option<i64>, Option<i64>, Option<i64>) = connection
+            .query_row(
+                "SELECT pinned_task_id, sticky_x, sticky_y
+                 FROM workspace_task_state WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| TaskError::storage())?;
+        let task = task_id.map(|id| read_task(&connection, id)).transpose()?;
+        let position = match (x, y) {
+            (None, None) => None,
+            (Some(x), Some(y)) => Some((
+                i32::try_from(x).map_err(|_| TaskError::storage())?,
+                i32::try_from(y).map_err(|_| TaskError::storage())?,
+            )),
+            _ => return Err(TaskError::storage()),
+        };
+        Ok(TaskNoteSnapshot { task, position })
+    }
+
+    pub(crate) fn save_sticky_position(&self, x: i32, y: i32) -> Result<(), TaskError> {
+        let changed = self
+            .connect()?
+            .execute(
+                "UPDATE workspace_task_state SET sticky_x = ?1, sticky_y = ?2 WHERE id = 1",
+                params![x, y],
+            )
+            .map_err(|_| TaskError::storage())?;
+        if changed != 1 {
+            return Err(TaskError::storage());
+        }
+        Ok(())
+    }
+
     fn connect(&self) -> Result<Connection, TaskError> {
         crate::storage::connect(&self.database_path).map_err(|_| TaskError::storage())
     }
@@ -453,10 +562,14 @@ fn validate_task_input(input: TaskInput) -> Result<TaskInput, TaskError> {
     let notes = validate_notes(input.notes)?;
     let due_date = input.due_date.map(validate_due_date).transpose()?;
     let repository = input.repository.map(validate_repository).transpose()?;
+    if input.kind == TaskKind::Personal && repository.is_some() {
+        return Err(TaskError::invalid_input());
+    }
     Ok(TaskInput {
         list_id: input.list_id,
         title,
         notes,
+        kind: input.kind,
         priority: input.priority,
         due_date,
         repository,
@@ -573,6 +686,26 @@ fn parse_timestamp(value: String) -> Result<DateTime<Utc>, TaskError> {
         return Err(TaskError::storage());
     }
     Ok(parsed.with_timezone(&Utc))
+}
+
+fn ensure_default_list(connection: &Connection) -> Result<(), TaskError> {
+    let has_list = connection
+        .query_row("SELECT EXISTS(SELECT 1 FROM task_lists)", [], |row| {
+            row.get::<_, bool>(0)
+        })
+        .map_err(|_| TaskError::storage())?;
+    if has_list {
+        return Ok(());
+    }
+    let now = utc_now();
+    connection
+        .execute(
+            "INSERT INTO task_lists (name, name_key, created_at, updated_at)
+             VALUES ('My tasks', 'my tasks', ?1, ?1)",
+            [now],
+        )
+        .map_err(|_| TaskError::storage())?;
+    Ok(())
 }
 
 fn ensure_list_exists(connection: &Connection, list_id: i64) -> Result<(), TaskError> {
@@ -713,7 +846,7 @@ fn read_tasks(connection: &Connection, query: &TaskQuery) -> Result<Vec<TaskItem
     let priority = query.priority.map(TaskPriority::as_str);
     let mut statement = connection
         .prepare(
-            "SELECT id, list_id, title, notes, priority, due_date, repository_id,
+            "SELECT id, list_id, title, notes, task_kind, priority, due_date, repository_id,
                     repository_full_name, completed_at, created_at, updated_at
              FROM tasks
              WHERE (?1 IS NULL OR list_id = ?1)
@@ -737,7 +870,7 @@ fn read_tasks(connection: &Connection, query: &TaskQuery) -> Result<Vec<TaskItem
 fn read_task(connection: &Connection, task_id: i64) -> Result<TaskItem, TaskError> {
     connection
         .query_row(
-            "SELECT id, list_id, title, notes, priority, due_date, repository_id,
+            "SELECT id, list_id, title, notes, task_kind, priority, due_date, repository_id,
                     repository_full_name, completed_at, created_at, updated_at
              FROM tasks WHERE id = ?1",
             [task_id],
@@ -754,6 +887,7 @@ type TaskRow = (
     i64,
     String,
     Option<String>,
+    String,
     String,
     Option<String>,
     Option<i64>,
@@ -776,16 +910,17 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
         row.get(8)?,
         row.get(9)?,
         row.get(10)?,
+        row.get(11)?,
     ))
 }
 
 fn parse_task_row(row: TaskRow) -> Result<TaskItem, TaskError> {
     let due_date = row
-        .5
+        .6
         .map(validate_due_date)
         .transpose()
         .map_err(|_| TaskError::storage())?;
-    let repository = match (row.6, row.7) {
+    let repository = match (row.7, row.8) {
         (None, None) => None,
         (Some(id), Some(full_name)) if id > 0 => {
             let repository_id = u64::try_from(id).map_err(|_| TaskError::storage())?;
@@ -807,12 +942,13 @@ fn parse_task_row(row: TaskRow) -> Result<TaskItem, TaskError> {
         list_id: row.1,
         title: row.2,
         notes: row.3,
-        priority: TaskPriority::parse(&row.4)?,
+        kind: TaskKind::parse(&row.4)?,
+        priority: TaskPriority::parse(&row.5)?,
         due_date,
         repository,
-        completed_at: row.8.map(parse_timestamp).transpose()?,
-        created_at: parse_timestamp(row.9)?,
-        updated_at: parse_timestamp(row.10)?,
+        completed_at: row.9.map(parse_timestamp).transpose()?,
+        created_at: parse_timestamp(row.10)?,
+        updated_at: parse_timestamp(row.11)?,
     })
 }
 
@@ -833,6 +969,7 @@ mod tests {
             list_id,
             title: "Review workspace".to_string(),
             notes: Some("Check the dashboard\r\nthen tests".to_string()),
+            kind: TaskKind::Work,
             priority: TaskPriority::High,
             due_date: Some("2026-10-01".to_string()),
             repository: Some(TaskRepositoryInput {
@@ -840,6 +977,21 @@ mod tests {
                 full_name: "octo-cat/ellie".to_string(),
             }),
         }
+    }
+
+    #[test]
+    fn first_bootstrap_creates_the_single_default_list() {
+        let (_temp, service) = service();
+        let first = service.bootstrap().expect("bootstrap");
+        assert_eq!(first.lists.len(), 1);
+        assert_eq!(first.lists[0].name, "My tasks");
+        assert!(first.tasks.is_empty());
+
+        let reopened = TaskService::new(service.database_path.clone())
+            .bootstrap()
+            .expect("restart");
+        assert_eq!(reopened.lists.len(), 1);
+        assert_eq!(reopened.lists[0].id, first.lists[0].id);
     }
 
     #[test]
@@ -853,6 +1005,7 @@ mod tests {
             task.notes.as_deref(),
             Some("Check the dashboard\nthen tests")
         );
+        assert_eq!(task.kind, TaskKind::Work);
         assert_eq!(
             task.repository.as_ref().map(|link| link.html_url.as_str()),
             Some("https://github.com/octo-cat/ellie")
@@ -868,11 +1021,17 @@ mod tests {
             vec![task.clone()]
         );
         service.set_pinned(Some(task.id)).expect("pin");
+        service
+            .save_sticky_position(120, -40)
+            .expect("save sticky position");
         let reopened = TaskService::new(service.database_path.clone());
         let bootstrap = reopened.bootstrap().expect("bootstrap");
         assert_eq!(bootstrap.pinned_task_id, Some(task.id));
         assert_eq!(bootstrap.tasks[0].repository, task.repository);
-        let completed = reopened.set_completed(task.id, true).expect("complete");
+        let note = reopened.task_note_snapshot().expect("sticky note");
+        assert_eq!(note.task.as_ref().map(|item| item.id), Some(task.id));
+        assert_eq!(note.position, Some((120, -40)));
+        let completed = reopened.complete_pinned().expect("complete pinned");
         assert!(completed.completed_at.is_some());
         assert_eq!(
             reopened
@@ -901,6 +1060,7 @@ mod tests {
                     list_id: list.id,
                     title: "Ship workspace".to_string(),
                     notes: None,
+                    kind: TaskKind::Personal,
                     priority: TaskPriority::Medium,
                     due_date: Some("2026-12-31".to_string()),
                     repository: None,
@@ -971,6 +1131,15 @@ mod tests {
                 TaskErrorCategory::InvalidInput
             );
         }
+        let mut personal_repository = task_input(list.id);
+        personal_repository.kind = TaskKind::Personal;
+        assert_eq!(
+            service
+                .create_task(personal_repository)
+                .expect_err("personal task with repository")
+                .category(),
+            TaskErrorCategory::InvalidInput
+        );
         let mut invalid_repository = task_input(list.id);
         invalid_repository.repository = Some(TaskRepositoryInput {
             repository_id: 1,

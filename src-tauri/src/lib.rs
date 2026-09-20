@@ -13,6 +13,7 @@ pub mod providers;
 mod refresh;
 mod settings;
 mod storage;
+mod task_note;
 pub mod tasks;
 mod tray;
 
@@ -72,6 +73,7 @@ pub fn run() -> Result<(), AppError> {
                 .https_only(true)
                 .build()
                 .map_err(|_| AppError::Startup)?;
+            let tasks = Arc::new(tasks::TaskService::new(database_path.clone()));
             app.manage(AppState {
                 database_path: database_path.clone(),
                 github: Arc::new(github::GitHubService::new(
@@ -91,11 +93,12 @@ pub fn run() -> Result<(), AppError> {
                     std::env::var_os(local_api_token::ENVIRONMENT),
                     api::API_ADDRESS,
                 ),
-                tasks: Arc::new(tasks::TaskService::new(database_path.clone())),
+                tasks: Arc::clone(&tasks),
                 close_to_tray: Arc::new(AtomicBool::new(settings.close_to_tray)),
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
                 mini_move_generation: AtomicU64::new(0),
+                task_note_move_generation: AtomicU64::new(0),
                 provider_registry: {
                     let mut registry = providers::ProviderRegistry::default();
                     registry.register(Arc::new(providers::OpenAiProvider));
@@ -110,11 +113,24 @@ pub fn run() -> Result<(), AppError> {
             if let Err(error) = mini_bar::apply(app.handle(), &settings) {
                 tracing::warn!(event = "mini_bar_startup_failed", error = ?error);
             }
+            let note_tasks = Arc::clone(&tasks);
+            let note_snapshot =
+                tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking(move || {
+                    note_tasks.task_note_snapshot()
+                }));
+            match note_snapshot {
+                Ok(Ok(snapshot)) => {
+                    if let Err(error) = task_note::apply(app.handle(), &snapshot) {
+                        tracing::warn!(event = "task_note_startup_failed", error = ?error);
+                    }
+                }
+                _ => tracing::warn!(event = "task_note_startup_failed"),
+            }
             api::spawn(app.handle().clone());
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 14);
+            tracing::info!(event = "app_started", schema_version = 17);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -154,7 +170,10 @@ pub fn run() -> Result<(), AppError> {
             commands::task_update,
             commands::task_set_completed,
             commands::task_delete,
-            commands::task_set_pinned
+            commands::task_set_pinned,
+            commands::task_note_bootstrap,
+            commands::task_note_complete,
+            commands::task_note_unpin
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" {
@@ -202,6 +221,41 @@ pub fn run() -> Result<(), AppError> {
                             tracing::warn!(event = "mini_bar_position_save_failed");
                         }
                     });
+                }
+            } else if window.label() == task_note::WINDOW_LABEL {
+                match event {
+                    tauri::WindowEvent::Moved(position) => {
+                        let state = window.state::<AppState>();
+                        let generation = state
+                            .task_note_move_generation
+                            .fetch_add(1, Ordering::Relaxed)
+                            .wrapping_add(1);
+                        let app = window.app_handle().clone();
+                        let (x, y) = (position.x, position.y);
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            let state = app.state::<AppState>();
+                            if state.task_note_move_generation.load(Ordering::Relaxed) != generation
+                            {
+                                return;
+                            }
+                            let tasks = Arc::clone(&state.tasks);
+                            let result = tauri::async_runtime::spawn_blocking(move || {
+                                tasks.save_sticky_position(x, y)
+                            })
+                            .await;
+                            if !matches!(result, Ok(Ok(()))) {
+                                tracing::warn!(event = "task_note_position_save_failed");
+                            }
+                        });
+                    }
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        if window.hide().is_err() {
+                            tracing::warn!(event = "task_note_hide_failed");
+                        }
+                    }
+                    _ => {}
                 }
             }
         })

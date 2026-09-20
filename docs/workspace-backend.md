@@ -59,13 +59,13 @@ Bounded, redacted errors distinguish validation, conflict, permissions, authenti
 
 ## Local tasks
 
-Proposed task fields: stable local ID/list ID, bounded required title, optional bounded plain-text notes, priority `none|low|medium|high`, optional due date, optional repository identity link, UTC created/updated/completed timestamps and stable ordering.
+Implemented task fields: stable local ID/internal list ID, bounded required title, optional bounded plain-text details, explicit `work|personal` type, priority `none|low|medium|high`, optional due date, optional validated repository identity link for Work only, UTC created/updated/completed timestamps, and stable ordering. The first bootstrap transaction creates one internal `My tasks` list when storage is empty; the frontend presents one aggregate board.
 
 Due dates are validated calendar dates (`YYYY-MM-DD`), not UTC timestamps. Overdue means incomplete and earlier than today's local calendar date; timezone changes may alter this state. No reminders or notification scheduler are introduced.
 
-Pin at most one incomplete task. Completing/deleting that task clears the pin in the same transaction. List deletion confirms the affected count; if membership changes before confirmation, request renewed confirmation. Save errors preserve frontend drafts. Repository link snapshots survive disconnect/cache cleanup without keeping the whole GitHub cache or deleting tasks; show disconnected/unavailable status.
+Pin at most one incomplete task. Completing/deleting that task clears the pin in the same transaction. The same pin drives Overview → Focus and the dedicated `task-note` window. The note stores only non-sensitive physical coordinates, restores them within a current monitor work area, and can complete or unpin only the current pinned task—its IPC accepts no arbitrary task ID. Save errors preserve frontend drafts. Repository link snapshots survive disconnect/cache cleanup without keeping the whole GitHub cache or deleting tasks; show disconnected/unavailable status.
 
-Proposed duplicate-list-name policy and exact input limits remain decisions to finalize before W4.
+List-name uniqueness and exact input limits are enforced in Rust/SQLite for compatibility with existing task rows, although list administration is no longer exposed by the single-board UI. Schema 15 conditionally repairs development databases missing `task_lists.name_key`, backfills collision-safe keys, and preserves existing lists/tasks before creating the unique index.
 
 ## Conceptual persistence
 
@@ -79,9 +79,9 @@ Names below describe responsibilities, not committed SQL contracts. Use additive
 | Commits + memberships | SHA, subject, optional linked account, timestamps, scoped branch membership |
 | Sync coverage | Bounded run metadata, pagination counts, coverage and reasons |
 | Creation attempts | Minimal review/pending/outcome state for duplicate suppression and recovery |
-| Task lists/tasks | Local content, priority/date/lifecycle and indexes |
-| Task repository links | Retained identity snapshot independent of cache deletion |
-| Workspace preferences | Current-task pin and HUD content selection |
+| Task lists/tasks | Internal board identity; local content, Work/Personal type, priority/date/lifecycle and indexes |
+| Task repository links | Retained Work-task identity snapshot independent of cache deletion |
+| Workspace preferences | Current-task pin, sticky-note coordinates, and future HUD content selection |
 
 GitHub cache retention is proposed at 90 days, independent of AI history cleanup. Bound sync/attempt metadata retention as well. Tasks/links persist until explicit deletion. Ordinary SQLite is not encrypted: task notes and private repository metadata rely on the Windows user environment, not Credential Manager protection.
 
@@ -89,7 +89,7 @@ Migration tests must cover populated-database upgrades, transaction rollback, re
 
 ## IPC, events and HUD
 
-Main-window-only typed commands cover connection lifecycle, repository selection, bounded commit queries/sync, prepare/confirm creation and local list/task operations. Validate window identity, IDs, lengths, dates, enum values, control characters and account ownership in Rust. Derive requests and external links from trusted host plus validated identities; never accept arbitrary API URLs.
+Main-window-only typed commands cover connection lifecycle, repository selection, bounded commit queries/sync, prepare/confirm creation, and general task operations. The separate `task-note` capability can bootstrap, complete, or unpin only the current pinned task and restore the main window; it cannot enumerate/edit arbitrary tasks, use GitHub/provider/settings commands, or open arbitrary URLs. Validate window identity, IDs, lengths, dates, enum values, control characters and account ownership in Rust. Derive requests and external links from trusted host plus validated identities; never accept arbitrary API URLs.
 
 Keep `/api/v1` and `ellie-cli` behavior unchanged. Workspace content is not automatically exposed to local integrations. Existing provider events retain their meanings.
 

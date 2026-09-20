@@ -5,7 +5,7 @@
 **Implementation active on `feat/workspace-github`.** W1–W5 are implemented in the working tree; W6 (expanded HUD) remains pending. The owner selected:
 
 - GitHub **track + create**: view authorized public/private repositories, track pushed commits, and create repositories.
-- **Local to-do lists**: private tasks with completion, priority, due dates, and optional repository links; no issue synchronization.
+- **Local to-do board**: private Work/Personal tasks with details, completion, priority, due dates, optional Work repository links, and one desktop sticky-note pin; no issue synchronization.
 - **Expand the existing floating bar**: quota, commit activity, and a current task in an optional compact HUD that opens dashboard details.
 - Preserve existing token/quota monitoring and improve the detailed dashboard.
 
@@ -37,8 +37,8 @@ AI monitoring remains a first-class feature, usable without connecting GitHub or
 | Authorized GitHub repository browsing | Unrestricted GitHub account administration |
 | Pushed commit history for selected repositories | Local folder scanning, unpushed commits, Git staging/push/pull |
 | Explicitly confirmed repository creation | Repository deletion, code editing, merges, settings management |
-| Local lists and tasks | GitHub Issues, PR management, task sync, team collaboration |
-| Dashboard redesign and expanded mini bar | A second desktop panel, game injection, animated companion |
+| One local task board and one bounded pinned-task sticky note | GitHub Issues, PR management, task sync, team collaboration |
+| Dashboard redesign and expanded mini bar | A second command-center panel, game injection, animated companion |
 | Existing quota, history, settings, API and CLI compatibility | New providers or new API/CLI routes |
 
 “Full access” is narrowed by the owner's choice to **track + create**, not blanket write permission. Access is always limited by the authenticated account, granted permissions, repository selection, and organization policy.
@@ -90,14 +90,14 @@ Retain existing provider cards, supported quota windows, used/remaining labels, 
 
 ### To-do
 
-- Create, rename, and delete local lists. Confirm deletion of a list and its tasks, including the affected count.
-- Create/edit tasks: required title, optional plain-text notes, priority (none/low/medium/high), optional due date, optional repository link.
-- Complete/reopen and delete tasks, with explicit delete confirmation. No notification/reminder system in this scope.
-- Filter by list, completion, priority, and due state. Proposed default: incomplete tasks first, then due date and stable creation order.
-- Pin one incomplete task as the current task for Overview/HUD. Completing or deleting it clears the pin; do not silently choose the next task.
-- Repository links are optional metadata, not synchronization. Removing GitHub access must never delete a task.
+- Present one local `My tasks` board. Rust creates its internal list automatically on the first bootstrap, so users do not choose a storage destination or manage list containers.
+- Create/edit tasks with required name, optional plain-text details, explicit Work/Personal type, priority (`none|low|medium|high`), and optional due date.
+- Work tasks may retain one optional validated GitHub repository identity snapshot. Personal tasks cannot retain a repository. This is metadata, not synchronization; removing GitHub access never deletes a task.
+- Complete/reopen and delete tasks, with explicit task-delete confirmation. No notification/reminder system is introduced.
+- Filter by completion, Work/Personal type, and priority. Incomplete tasks remain first, then due date and stable creation order.
+- Pin one incomplete task as the current task for both Overview → Focus and a dedicated always-on-top, draggable sticky-note window. Complete/unpin/Open Ellie are its only task actions; it cannot enumerate or edit other tasks. Completing, deleting, or unpinning clears the pin and closes the note without selecting a replacement.
 - Due dates are calendar dates (`YYYY-MM-DD`), not UTC instants. Created/updated/completed timestamps are UTC. Overdue means an incomplete task's due date precedes the user's current local date.
-- Save failures preserve the user's draft and show retry; only report success after persistence succeeds.
+- Save failures preserve the user's draft and show retry; only report success after persistence succeeds. Tasks live in Ellie's ordinary local SQLite database under `%LOCALAPPDATA%`, not Credential Manager or GitHub.
 
 ## 3. Repository creation flow
 
