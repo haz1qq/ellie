@@ -397,12 +397,23 @@ pub async fn github_list_commits(
     owner: String,
     repo: String,
     branch: Option<String>,
+    max_rows: Option<usize>,
 ) -> Result<Vec<crate::github::CommitSummary>, crate::github::GitHubError> {
     require_github_main_window(window.label())?;
-    app_state
-        .github
-        .list_commits(&owner, &repo, branch.as_deref())
-        .await
+    match max_rows {
+        Some(max_rows) => {
+            app_state
+                .github
+                .list_commits_limited(&owner, &repo, branch.as_deref(), max_rows)
+                .await
+        }
+        None => {
+            app_state
+                .github
+                .list_commits(&owner, &repo, branch.as_deref())
+                .await
+        }
+    }
 }
 
 #[tauri::command]

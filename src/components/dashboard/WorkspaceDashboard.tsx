@@ -41,8 +41,8 @@ export interface WorkspaceDashboardProps {
   refreshingProvider: string | null;
   github: GitHubConnectionApi;
   tasks: TaskController;
-  /** First repository for the commit feed; null when disconnected. */
-  defaultRepository: { owner: string; repo: string; branch: string | null } | null;
+  /** Loaded repositories whose default branches contribute to the recent commit feed. */
+  repositories: Array<{ id: number; fullName: string; htmlUrl: string }>;
   onRefreshAll: () => void;
   onRefreshProvider: (providerId: string) => void;
   onHideProvider: (providerId: string) => void;
@@ -64,7 +64,7 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
     refreshingProvider,
     github,
     tasks,
-    defaultRepository,
+    repositories,
     onRefreshAll,
     onRefreshProvider,
     onHideProvider,
@@ -200,7 +200,7 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
           <RecentCommitsCard
             native={native}
             connected={githubConnected}
-            defaultRepository={defaultRepository}
+            repositories={repositories}
             onOpenGitHub={() => onNavigate("github")}
           />
         </div>

@@ -387,11 +387,12 @@ export const desktop = {
   githubDisconnect: () => invoke<GitHubConnectionStatus>("github_disconnect"),
   githubListRepositories: () =>
     invoke<GitHubRepositorySummary[]>("github_list_repositories"),
-  githubListCommits: (owner: string, repo: string, branch?: string) =>
+  githubListCommits: (owner: string, repo: string, branch?: string, maxRows?: number) =>
     invoke<GitHubCommitSummary[]>("github_list_commits", {
       owner,
       repo,
       branch: branch || undefined,
+      maxRows,
     }),
   githubContributionCalendar: (query?: GitHubContributionCalendarQuery) =>
     invoke<GitHubContributionCalendar>("github_contribution_calendar", { query: query ?? {} }),

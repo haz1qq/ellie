@@ -948,7 +948,23 @@ impl GitHubService {
         repository: &str,
         branch: Option<&str>,
     ) -> Result<Vec<CommitSummary>, GitHubError> {
-        let result = self.list_commits_inner(owner, repository, branch).await;
+        let result = self
+            .list_commits_inner(owner, repository, branch, self.limits.max_rows)
+            .await;
+        self.record_result(&result);
+        result
+    }
+
+    pub async fn list_commits_limited(
+        &self,
+        owner: &str,
+        repository: &str,
+        branch: Option<&str>,
+        max_rows: usize,
+    ) -> Result<Vec<CommitSummary>, GitHubError> {
+        let result = self
+            .list_commits_inner(owner, repository, branch, max_rows)
+            .await;
         self.record_result(&result);
         result
     }
@@ -958,6 +974,7 @@ impl GitHubService {
         owner: &str,
         repository: &str,
         branch: Option<&str>,
+        max_rows: usize,
     ) -> Result<Vec<CommitSummary>, GitHubError> {
         self.restore_if_needed().await?;
         validate_repository_identifier(owner)?;
@@ -966,16 +983,18 @@ impl GitHubService {
             validate_branch(branch)?;
         }
 
+        let max_rows = max_rows.clamp(1, self.limits.max_rows);
+        let page_size = self.limits.page_size.min(max_rows);
         let mut output = Vec::new();
-        let mut pagination = BoundedPagination::new(self.limits.max_pages, self.limits.max_rows);
+        let mut pagination = BoundedPagination::new(self.limits.max_pages, max_rows);
         loop {
             let mut url = self.repository_commits_url(owner, repository)?;
             let page_number = pagination.current_page().to_string();
-            let page_size = self.limits.page_size.to_string();
+            let page_size_query = page_size.to_string();
             {
                 let mut query = url.query_pairs_mut();
                 query
-                    .append_pair("per_page", &page_size)
+                    .append_pair("per_page", &page_size_query)
                     .append_pair("page", &page_number);
                 if let Some(branch) = branch {
                     query.append_pair("sha", branch);
@@ -984,7 +1003,7 @@ impl GitHubService {
 
             let response = self.authorized_get(url).await?;
             let page = parse_commits(&response.body)?;
-            let has_next = response.has_next || page.len() == self.limits.page_size;
+            let has_next = response.has_next || page.len() == page_size;
             let decision = pagination.accept_page(page.len(), has_next);
             output.extend(page.into_iter().take(decision.take_rows));
             if decision.next_page.is_none() {
@@ -2912,6 +2931,47 @@ mod tests {
             assert!(request.contains(expected_query));
             assert!(!request.contains("author="));
         }
+    }
+
+    #[tokio::test]
+    async fn limits_commit_rows_and_request_page_size_for_overview_reads() {
+        let commit = |sha: &str, subject: &str| {
+            serde_json::json!({
+                "sha": sha,
+                "commit": {
+                    "message": subject,
+                    "author": { "date": "2026-01-02T03:04:05Z" },
+                    "committer": { "date": "2026-01-02T04:05:06Z" }
+                },
+                "author": { "id": 42, "login": "octo-cat" }
+            })
+        };
+        let body = serde_json::to_string(&vec![
+            commit("1111111111111111111111111111111111111111", "First"),
+            commit("2222222222222222222222222222222222222222", "Second"),
+        ])
+        .expect("fixture");
+        let (base, requests, server) = serve_sequence(vec![MockResponse {
+            status: "200 OK",
+            headers: "",
+            body,
+        }])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let service = test_service(&base, store.clone(), ServiceLimits::default());
+        mark_connected(&service, store.as_ref()).await;
+
+        let commits = service
+            .list_commits_limited("octo-cat", "ellie", None, 2)
+            .await
+            .expect("commits");
+        server.await.expect("mock server");
+
+        assert_eq!(commits.len(), 2);
+        let request = &requests.lock().expect("requests")[0];
+        assert!(request.starts_with("GET /repos/octo-cat/ellie/commits?"));
+        assert!(request.contains("per_page=2"));
+        assert!(request.contains("page=1"));
     }
 
     #[tokio::test]
