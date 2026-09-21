@@ -23,6 +23,7 @@ import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { EmptyState, Spinner } from "./ui/Panel";
 import { Select } from "./ui/Select";
+import { ContributionCalendarCard } from "./github/ContributionCalendarCard";
 import { CreationOutcomeBanner } from "./github/CreationOutcomeBanner";
 import { NewRepositoryDialog } from "./github/NewRepositoryDialog";
 
@@ -37,6 +38,8 @@ export interface GitHubPanelProps {
 }
 
 const COMMITS_PER_PAGE = 10;
+/** Repository list pagination on the GitHub page. */
+const REPOSITORIES_PER_PAGE = 12;
 
 const BRANCH_OPTIONS = [
   { value: "default", label: "Default branch" },
@@ -65,6 +68,8 @@ export function GitHubPanel({
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState("");
   const [commitPage, setCommitPage] = useState(1);
+  const [repoQuery, setRepoQuery] = useState("");
+  const [repoPage, setRepoPage] = useState(1);
   const [creationOpen, setCreationOpen] = useState(false);
 
   const connected = connection.status?.state === "Connected";
@@ -153,6 +158,31 @@ export function GitHubPanel({
     (commitPage - 1) * COMMITS_PER_PAGE,
     commitPage * COMMITS_PER_PAGE,
   );
+
+  const filteredRepositories = useMemo(() => {
+    const query = repoQuery.trim().toLowerCase();
+    if (!query) return repositories;
+    return repositories.filter(
+      (repo) =>
+        repo.fullName.toLowerCase().includes(query) ||
+        repo.name.toLowerCase().includes(query),
+    );
+  }, [repositories, repoQuery]);
+  const isFiltering = repoQuery.trim().length > 0;
+  const repoPageCount = Math.max(
+    1,
+    Math.ceil(filteredRepositories.length / REPOSITORIES_PER_PAGE),
+  );
+  const visibleRepositories = filteredRepositories.slice(
+    (repoPage - 1) * REPOSITORIES_PER_PAGE,
+    repoPage * REPOSITORIES_PER_PAGE,
+  );
+
+  useEffect(() => {
+    setRepoPage((page) =>
+      Math.min(page, Math.max(1, repoPageCount)),
+    );
+  }, [repoPageCount]);
 
   const stateLabel = !native
     ? "Desktop only"
@@ -251,6 +281,12 @@ export function GitHubPanel({
 
       <CreationOutcomeBanner native={native} connected={connected} />
 
+      <ContributionCalendarCard
+        native={native}
+        connected={connected}
+        login={connection.status?.account?.login ?? null}
+      />
+
       <div className="github-layout">
         <section className="panel" aria-label="Repositories">
           <header className="panel-header">
@@ -263,9 +299,26 @@ export function GitHubPanel({
                 ? "—"
                 : repositoriesLoading
                   ? "loading…"
-                  : `${repositories.length} loaded`}
+                  : isFiltering
+                    ? `${filteredRepositories.length} of ${repositories.length}`
+                    : `${repositories.length} loaded`}
             </span>
           </header>
+          {connected && !repositoriesLoading && !repositoriesError && (
+            <div className="repo-toolbar">
+              <input
+                type="search"
+                className="input repo-search"
+                placeholder="Search repositories…"
+                aria-label="Search repositories"
+                value={repoQuery}
+                onChange={(event) => {
+                  setRepoQuery(event.target.value);
+                  setRepoPage(1);
+                }}
+              />
+            </div>
+          )}
           {!native ? (
             <EmptyState title="Repositories need the desktop app">
               <p className="empty-state-text">
@@ -292,9 +345,20 @@ export function GitHubPanel({
                 The connected account returned no repositories in the bounded read.
               </p>
             </EmptyState>
+          ) : filteredRepositories.length === 0 ? (
+            <EmptyState title="No repositories match">
+              <p className="empty-state-text">
+                No repositories match “{repoQuery.trim()}”. Try a different
+                name or clear the search.
+              </p>
+              <Button size="sm" variant="ghost" onClick={() => setRepoQuery("")} className="empty-state-action">
+                Clear search
+              </Button>
+            </EmptyState>
           ) : (
-            <ul className="repo-grid">
-              {repositories.map((repo) => (
+            <>
+              <ul className="repo-grid">
+              {visibleRepositories.map((repo) => (
                 <li
                   key={repo.id}
                   className={
@@ -329,7 +393,33 @@ export function GitHubPanel({
                   </a>
                 </li>
               ))}
-            </ul>
+              </ul>
+              {repoPageCount > 1 && (
+                <nav className="pagination" aria-label="Repository pages">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={repoPage === 1}
+                    onClick={() => setRepoPage((page) => Math.max(1, page - 1))}
+                  >
+                    <ChevronLeft size={13} /> Previous
+                  </Button>
+                  <span>
+                    Page {repoPage} of {repoPageCount} · {filteredRepositories.length} loaded
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={repoPage === repoPageCount}
+                    onClick={() =>
+                      setRepoPage((page) => Math.min(repoPageCount, page + 1))
+                    }
+                  >
+                    Next <ChevronRight size={13} />
+                  </Button>
+                </nav>
+              )}
+            </>
           )}
         </section>
 
@@ -392,7 +482,7 @@ export function GitHubPanel({
                 ))}
               </ul>
               {commitPageCount > 1 && (
-                <nav className="commit-pagination" aria-label="Commit pages">
+                <nav className="pagination" aria-label="Commit pages">
                   <Button
                     size="sm"
                     variant="ghost"

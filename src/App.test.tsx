@@ -606,7 +606,7 @@ describe("GitHub page and repository creation", () => {
       name: "personal-notes",
       description: "My notes",
       private: true,
-      initializeReadme: true,
+      initializeReadme: false,
       expiresAt: "2026-09-08T12:00:00Z",
     });
     vi.mocked(desktop.githubConfirmRepositoryCreation).mockResolvedValue({

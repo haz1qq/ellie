@@ -36,7 +36,7 @@ export function NewRepositoryDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("private");
-  const [initializeReadme, setInitializeReadme] = useState(true);
+  const [initializeReadme, setInitializeReadme] = useState(false);
   const [review, setReview] = useState<RepositoryCreationReview | null>(null);
   const [error, setError] = useState("");
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export function NewRepositoryDialog({
       setName("");
       setDescription("");
       setVisibility("private");
-      setInitializeReadme(true);
+      setInitializeReadme(false);
       setReview(null);
       setError("");
       setCreatedUrl(null);
@@ -233,14 +233,17 @@ export function NewRepositoryDialog({
               </div>
             </Field>
             <Field label="Initialization">
-              <label className="inline-checkbox">
+              <div className="inline-checkbox">
                 <Checkbox
+                  id="repository-initialize-readme"
                   checked={initializeReadme}
                   onCheckedChange={setInitializeReadme}
                   label="Initialize with a README"
                 />
-                <span>Add a README on creation</span>
-              </label>
+                <label htmlFor="repository-initialize-readme">
+                  Add a README on creation
+                </label>
+              </div>
             </Field>
           </div>
         </form>

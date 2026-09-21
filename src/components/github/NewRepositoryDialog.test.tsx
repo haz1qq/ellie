@@ -24,19 +24,20 @@ beforeEach(() => {
 });
 
 describe("NewRepositoryDialog", () => {
-  it("is private by default and asks for review before creating", async () => {
+  it("is private and leaves README initialization off by default", async () => {
     vi.mocked(desktop.githubPrepareRepositoryCreation).mockResolvedValue({
       reviewId: "review-1", owner: "octocat", name: "personal-notes", description: null,
-      private: true, initializeReadme: true, expiresAt: "2026-09-08T12:00:00Z",
+      private: true, initializeReadme: false, expiresAt: "2026-09-08T12:00:00Z",
     });
     const user = userEvent.setup();
     openDialog();
+    expect(screen.getByRole("checkbox", { name: "Initialize with a README" })).not.toBeChecked();
     await user.type(screen.getByLabelText("Repository name"), "personal-notes");
     expect(screen.getByRole("button", { name: "Continue to review" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Continue to review" }));
     expect(await screen.findByText("Review before creating")).toBeVisible();
     expect(desktop.githubPrepareRepositoryCreation).toHaveBeenCalledWith({
-      name: "personal-notes", description: null, private: true, initializeReadme: true,
+      name: "personal-notes", description: null, private: true, initializeReadme: false,
     });
     expect(screen.queryByText(/Public repository/)).not.toBeInTheDocument();
   });
@@ -88,7 +89,7 @@ describe("NewRepositoryDialog", () => {
   it("reports success with a safe GitHub link and refreshes the repo list", async () => {
     vi.mocked(desktop.githubPrepareRepositoryCreation).mockResolvedValue({
       reviewId: "review-4", owner: "octocat", name: "safe-repo", description: null,
-      private: true, initializeReadme: true, expiresAt: "2026-09-08T12:00:00Z",
+      private: true, initializeReadme: false, expiresAt: "2026-09-08T12:00:00Z",
     });
     vi.mocked(desktop.githubConfirmRepositoryCreation).mockResolvedValue({
       id: 9, name: "safe-repo", fullName: "octocat/safe-repo", private: true, defaultBranch: "main",
