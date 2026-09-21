@@ -7,6 +7,7 @@ import {
   usageDescription,
 } from "../../lib/dashboard";
 import { formatAge, formatBalance, formatCount, formatReset } from "../../lib/format";
+import { ProviderMark } from "../providers/ProviderMark";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/Panel";
@@ -123,7 +124,10 @@ function CompactProviderRow({
       <header className="provider-row-header">
         <div className="provider-row-identity">
           <span className="provider-symbol" aria-hidden="true">
-            {snapshot ? snapshot.displayName.slice(0, 1) : provider.displayName.slice(0, 1)}
+            <ProviderMark
+              providerId={provider.providerId}
+              displayName={snapshot ? snapshot.displayName : provider.displayName}
+            />
           </span>
           <div>
             <h3 className="provider-row-name">{snapshot?.displayName ?? provider.displayName}</h3>

@@ -41,7 +41,7 @@ export interface ContributionCalendarCardProps {
   native: boolean;
   connected: boolean;
   login: string | null;
-  onOpenGitHub: () => void;
+  onOpenGitHub?: () => void;
 }
 
 /** GitHub's account-wide profile contribution calendar, fetched by Rust. */
@@ -131,9 +131,11 @@ export function ContributionCalendarCard({
               <RefreshCw size={13} /> Refresh
             </Button>
           ) : null}
-          <Button size="sm" variant="ghost" onClick={onOpenGitHub}>
-            Open GitHub
-          </Button>
+          {onOpenGitHub ? (
+            <Button size="sm" variant="ghost" onClick={onOpenGitHub}>
+              Open GitHub
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -148,9 +150,11 @@ export function ContributionCalendarCard({
           <p className="empty-state-text">
             Connect GitHub to load your real profile contribution calendar. Ellie does not substitute a zero.
           </p>
-          <Button size="sm" onClick={onOpenGitHub} className="empty-state-action">
-            Connect on the GitHub page
-          </Button>
+          {onOpenGitHub ? (
+            <Button size="sm" onClick={onOpenGitHub} className="empty-state-action">
+              Connect on the GitHub page
+            </Button>
+          ) : null}
         </EmptyState>
       ) : loading ? (
         <Spinner label="Loading GitHub contributions…" />

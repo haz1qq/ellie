@@ -2,6 +2,7 @@ import { EyeOff, RefreshCw } from "lucide-react";
 import type { ProviderOverview, UsageSnapshot } from "../../lib/desktop";
 import { providersCount, usageNote } from "../../lib/dashboard";
 import { formatAge, formatBalance, formatCount, formatReset, headerDetail } from "../../lib/format";
+import { ProviderMark } from "./ProviderMark";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/Panel";
@@ -119,7 +120,7 @@ function ProviderCard({
         <header className="provider-card-header">
           <div className="provider-identity">
             <span className="provider-symbol" aria-hidden="true">
-              {provider.displayName.slice(0, 1)}
+              <ProviderMark providerId={provider.providerId} displayName={provider.displayName} />
             </span>
             <div>
               <h3>{provider.displayName}</h3>
@@ -150,7 +151,7 @@ function ProviderCard({
       <header className="provider-card-header">
         <div className="provider-identity">
           <span className="provider-symbol" aria-hidden="true">
-            {snapshot.displayName.slice(0, 1)}
+            <ProviderMark providerId={provider.providerId} displayName={snapshot.displayName} />
           </span>
           <div>
             <h3>{snapshot.displayName}</h3>

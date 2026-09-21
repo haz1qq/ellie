@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { CheckCircle2, KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ProviderKeySource, ProviderOverview, Settings } from "../../lib/desktop";
@@ -6,6 +6,7 @@ import { desktop } from "../../lib/desktop";
 import { GitHubSettings } from "../GitHubSettings";
 import { LocalApiSettings } from "../LocalApiSettings";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 
 export interface SettingsPageProps {
   native: boolean;
@@ -255,19 +256,20 @@ function Setting({
   checked: boolean;
   onChange: (value: boolean) => void;
 }) {
+  const id = useId();
   return (
-    <label className="setting">
-      <span>
+    <div className="setting">
+      <label htmlFor={id}>
         <strong>{label}</strong>
         <span className="setting-detail">{detail}</span>
-      </span>
-      <input
-        type="checkbox"
-        className="setting-checkbox"
+      </label>
+      <Checkbox
+        id={id}
         checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
+        onCheckedChange={onChange}
+        label={label}
       />
-    </label>
+    </div>
   );
 }
 

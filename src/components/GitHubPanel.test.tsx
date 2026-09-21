@@ -9,6 +9,7 @@ vi.mock("../lib/desktop", () => ({
   desktop: {
     githubListRepositories: vi.fn(),
     githubListCommits: vi.fn(),
+    githubContributionCalendar: vi.fn(),
     githubRepositoryCreationStatus: vi.fn(),
     githubResolveRepositoryCreation: vi.fn(),
     githubPrepareRepositoryCreation: vi.fn(),
@@ -56,6 +57,20 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(desktop.githubListRepositories).mockResolvedValue([]);
   vi.mocked(desktop.githubListCommits).mockResolvedValue([]);
+  vi.mocked(desktop.githubContributionCalendar).mockResolvedValue({
+    totalContributions: 3,
+    startedOn: "2026-09-06",
+    endedOn: "2026-09-07",
+    weeks: [
+      {
+        firstDay: "2026-09-06",
+        days: [
+          { date: "2026-09-06", contributionCount: 0, level: 0, weekday: 0 },
+          { date: "2026-09-07", contributionCount: 3, level: 4, weekday: 1 },
+        ],
+      },
+    ],
+  });
   vi.mocked(desktop.githubRepositoryCreationStatus).mockResolvedValue([]);
   vi.mocked(desktop.githubResolveRepositoryCreation).mockResolvedValue(undefined);
 });
@@ -86,6 +101,7 @@ describe("GitHubPanel", () => {
     ]);
     renderPanel({}, connectedStatus);
     expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(await screen.findByText(/3 contributions in the last year/)).toBeVisible();
     expect(screen.getByText("2 loaded")).toBeVisible();
     await userEvent.setup().click(screen.getByRole("button", { name: /octocat\/notes/ }));
     await waitFor(() =>
@@ -185,5 +201,63 @@ describe("GitHubPanel", () => {
       ),
     );
     expect(screen.queryByText("mystery-repo")).not.toBeInTheDocument();
+  });
+
+  it("paginates repositories with twelve per page", async () => {
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue(
+      Array.from({ length: 13 }, (_, index) => ({
+        id: index + 1,
+        name: `repo-${String(index + 1).padStart(2, "0")}`,
+        fullName: `octocat/repo-${String(index + 1).padStart(2, "0")}`,
+        private: true,
+        defaultBranch: "main",
+        htmlUrl: `https://github.com/octocat/repo-${String(index + 1).padStart(2, "0")}`,
+      })),
+    );
+
+    renderPanel({}, connectedStatus);
+
+    expect(await screen.findByText("octocat/repo-01")).toBeVisible();
+    expect(screen.getByText("octocat/repo-12")).toBeVisible();
+    expect(screen.queryByText("octocat/repo-13")).not.toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2 · 13 loaded")).toBeVisible();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /Next/ }));
+    expect(await screen.findByText("octocat/repo-13")).toBeVisible();
+    expect(screen.queryByText("octocat/repo-01")).not.toBeInTheDocument();
+  });
+
+  it("searches repositories by name and shows the filtered count", async () => {
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue([
+      { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
+      { id: 2, name: "notes", fullName: "octocat/notes", private: false, defaultBranch: "main", htmlUrl: "https://github.com/octocat/notes" },
+      { id: 3, name: "dashboard", fullName: "octocat/dashboard", private: false, defaultBranch: "main", htmlUrl: "https://github.com/octocat/dashboard" },
+    ]);
+
+    renderPanel({}, connectedStatus);
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(screen.getByText("3 loaded")).toBeVisible();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("searchbox", { name: "Search repositories" }), "notes");
+    expect(screen.getByText("octocat/notes")).toBeVisible();
+    expect(screen.queryByText("octocat/ellie")).not.toBeInTheDocument();
+    expect(screen.queryByText("octocat/dashboard")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3")).toBeVisible();
+  });
+
+  it("offers a clear-search action when no repository matches", async () => {
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue([
+      { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
+    ]);
+
+    renderPanel({}, connectedStatus);
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("searchbox", { name: "Search repositories" }), "missing-repo");
+    expect(await screen.findByText("No repositories match")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
   });
 });
