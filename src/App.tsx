@@ -170,18 +170,6 @@ export default function App() {
     setNewRepositoryRequest((value) => value + 1);
   }
 
-  const defaultRepository = (() => {
-    const first = repositories.repositories[0];
-    if (!first) return null;
-    const owner = first.fullName.includes("/")
-      ? first.fullName.slice(0, first.fullName.indexOf("/"))
-      : first.fullName;
-    const name = first.fullName.includes("/")
-      ? first.fullName.slice(first.fullName.indexOf("/") + 1)
-      : first.fullName;
-    return { owner, repo: name, branch: null };
-  })();
-
   const friendly = settings?.friendlyMessages ?? true;
   const showMascot = settings?.showMascot ?? true;
 
@@ -241,7 +229,7 @@ export default function App() {
           refreshingProvider={refreshingProvider}
           github={github}
           tasks={tasks}
-          defaultRepository={defaultRepository}
+          repositories={repositories.repositories}
           onRefreshAll={() => void refreshAll()}
           onRefreshProvider={(providerId) => void refreshProvider(providerId)}
           onHideProvider={(providerId) => void hideProvider(providerId)}
