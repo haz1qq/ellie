@@ -21,6 +21,10 @@ pub struct Settings {
     pub mini_bar_x: Option<i32>,
     #[serde(default)]
     pub mini_bar_y: Option<i32>,
+    #[serde(default, rename = "miniBarShowGitHub")]
+    pub mini_bar_show_github: bool,
+    #[serde(default, rename = "miniBarShowTask")]
+    pub mini_bar_show_task: bool,
 }
 
 pub const DEFAULT_MINI_BAR_OPACITY: f64 = 0.9;
@@ -125,6 +129,8 @@ mod tests {
                 mini_bar_opacity: super::DEFAULT_MINI_BAR_OPACITY,
                 mini_bar_x: None,
                 mini_bar_y: None,
+                mini_bar_show_github: false,
+                mini_bar_show_task: false,
             };
             assert!(settings.validate().is_err());
         }

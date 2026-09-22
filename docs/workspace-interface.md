@@ -1,6 +1,6 @@
 # Workspace interface design
 
-**Status: implemented for the main window; expanded HUD pending.** This document expands the [workspace upgrade plan](workspace-upgrade.md). GitHub browsing/creation, local lists/tasks, the six-view command-center hierarchy, and the integrated Overview are implemented on `feat/workspace-github` and merged to `main`. The expanded HUD remains future work. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
+**Status: implemented for the main window; expanded HUD implemented.** This document expands the [workspace upgrade plan](workspace-upgrade.md). GitHub browsing/creation, local lists/tasks, the six-view command-center hierarchy, the integrated Overview, and the expanded HUD are implemented on `feat/workspace-github` and merged to `main`. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
 
 ## Preserve the existing application
 
@@ -108,7 +108,7 @@ Open · Completed · Overdue · Sticky
 
 Ellie creates one internal `My tasks` list on first bootstrap and presents it as a single local board; users do not configure a storage destination or manage list containers. The editor includes task name, optional details, explicit Work/Personal type, priority, optional calendar due date, and an optional repository link shown only for Work. Labels remain visible; required/invalid states include text. Save success follows durable SQLite persistence and failed saves retain drafts. Task deletion requires confirmation.
 
-Pinning one incomplete task promotes it to Overview → Focus and opens Ellie's custom `task-note` window: always on top, taskbar-free, draggable, and position-persistent. It shows only the pinned task with Complete, Unpin, and Open Ellie actions. Completing, deleting, or unpinning clears the pin and closes the note without choosing a replacement. This dedicated sticky note is separate from the unchanged quota-only mini bar and does not implement the pending expanded HUD.
+Pinning one incomplete task promotes it to Overview → Focus and opens Ellie's custom `task-note` window: always on top, taskbar-free, draggable, and position-persistent. It shows only the pinned task with Complete, Unpin, and Open Ellie actions. Completing, deleting, or unpinning clears the pin and closes the note without choosing a replacement. This dedicated sticky note is separate from the quota-only mini bar and the expanded HUD sections.
 
 ## Repository creation interaction
 
@@ -118,7 +118,7 @@ While submitted, disable duplicate creation. A timeout yields **Creation outcome
 
 ## Expanded HUD
 
-Preserve the existing mini window identity and quota-only mode. Add optional GitHub and current-task sections; default both off on upgrade. W6 does not add a second command-center panel; the separately owner-authorized `task-note` window is a bounded sticky note for one pinned local task, not the expanded HUD.
+Preserve the existing mini window identity and quota-only mode. Optional GitHub and current-task sections are implemented and default OFF on upgrade; enabling either resizes the mini window through bounded band heights (96 px quota band, 52 px task band, 76 px GitHub band) clamped to the monitor work area. W6 does not add a second command-center panel; the separately owner-authorized `task-note` window is a bounded sticky note for one pinned local task, not the expanded HUD.
 
 ```text
 ┌────────────────────────────────────────────────────────────────┐
@@ -175,12 +175,20 @@ Checks actually run by the parent for W5b: `npm run typecheck`, `npm run lint`, 
 
 ## Acceptance checklist for later implementation
 
-- Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states.
+- Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states. The HUD quota band keeps its existing states; the GitHub band distinguishes disconnected/authorizing/loaded-but-stale/unloaded; the task band distinguishes pinned/no-pin.
 - Existing quota values, hidden providers, analytics, refresh, settings, and credential flows regress neither visually nor semantically.
-- Narrow layouts and native DPI/monitor changes preserve labels and controls.
+- Narrow layouts and native DPI/monitor changes preserve labels and controls. HUD sizing is Rust-computed per enabled section and clamped to the monitor work area; a native DPI/interaction pass remains to be recorded.
 - Keyboard users can reach pages, editors, confirmations, HUD sections, and reset-position controls.
 - Reduced motion, reduced transparency, forced colors, composite contrast, and focus restoration are verified.
 - HUD navigation uses typed, bounded native destinations; no added network work or general write permissions.
-- Extend frontend and native-window contract tests; record the commands and Windows smoke checks actually executed.
+- Frontend and native-window contract tests cover the expanded HUD; record the commands and Windows smoke checks actually executed.
 
-The implemented sections above record automated checks actually run. Contrast measurements and native Windows interaction/DPI smoke checks remain outstanding. Only the expanded HUD proposal remains documentation-only in this interface plan.
+The implemented sections above record automated checks actually run. Contrast measurements and native Windows interaction/DPI smoke checks remain outstanding for the expanded HUD panels.
+
+## W6 implementation status (implemented on `feat/workspace-github`, merged to `main`)
+
+Implemented and verified against the expanded-HUD contract: Settings adds `miniBarShowTask` and `miniBarShowGitHub` opt-ins (default OFF, migration 0018); `get_mini_bootstrap` returns gated `task` and `github` projections; the GitHub projection is a shared in-memory cache updated only by main-window commit reads (never polls); `open_main_section` navigates the main window through a bounded six-view set; the mini window sizes itself from enabled sections (96 px quota band, +52 px task band, +76 px GitHub band) clamped to the monitor work area and emits `mini-refresh` when shown; task changes re-bootstrap the HUD through the existing `tasks-updated` event. The frontend renders sibling focusable section buttons that open To-do/GitHub, with explicit stale/loaded scope copy and a no-pinned-task state.
+
+Checks run on `main`: `npm run typecheck`, `npm run lint`, `npm test` (132), `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` (155 library tests incl. HUD sizing and shared-cache tests, 32 CLI tests). Native Windows interaction/DPI dragging and clean-quit smoke checks for the expanded HUD remain to be recorded.
+
+The implemented sections above record automated checks actually run. Contrast measurements and native Windows interaction/DPI smoke checks remain outstanding for the expanded HUD panels.

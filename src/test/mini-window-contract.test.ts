@@ -49,4 +49,19 @@ describe("mini window native contract", () => {
       /\.mini-bar[^{]*\{[^}]*min-height:\s*0;[^}]*padding-top:\s*0;/s,
     );
   });
+
+  it("exposes the expanded HUD navigation and section sizing contract", () => {
+    // Bounded main-window navigation from the mini window.
+    expect(commands).toContain("pub fn open_main_section");
+    expect(commands).toContain("\"dashboard\",");
+    expect(commands).toContain("\"history\",");
+    expect(commands).toContain("\"settings\",");
+    const mini = read("src-tauri/capabilities/mini.json");
+    expect(mini).toContain("allow-open-main-section");
+    // The base quota band keeps the original 480×96 sizing; enabled sections
+    // add fixed bands that Rust derives the window height from.
+    expect(styles).toMatch(/\.mini-band-quota[^{]*\{[^}]*height:\s*96px;/s);
+    expect(styles).toMatch(/\.mini-band-task[^{]*\{[^}]*height:\s*52px;/s);
+    expect(styles).toMatch(/\.mini-band-github[^{]*\{[^}]*height:\s*76px;/s);
+  });
 });

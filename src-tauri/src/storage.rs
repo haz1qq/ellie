@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -25,6 +25,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0015_workspace_task_list_repair.sql"),
     include_str!("../migrations/0016_workspace_task_kind.sql"),
     include_str!("../migrations/0017_workspace_task_sticky_note.sql"),
+    include_str!("../migrations/0018_mini_bar_sections.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -137,7 +138,8 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
     let (mut settings, thresholds, hidden): (Settings, String, String) = connection.query_row(
         "SELECT close_to_tray, show_mascot, friendly_messages, notifications_enabled,
                 notification_thresholds, hidden_provider_ids, mini_bar_enabled,
-                mini_bar_opacity, mini_bar_x, mini_bar_y
+                mini_bar_opacity, mini_bar_x, mini_bar_y, mini_bar_show_github,
+                mini_bar_show_task
          FROM application_settings WHERE id = 1",
         [],
         |row| {
@@ -153,6 +155,8 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
                     mini_bar_opacity: row.get(7)?,
                     mini_bar_x: row.get(8)?,
                     mini_bar_y: row.get(9)?,
+                    mini_bar_show_github: row.get(10)?,
+                    mini_bar_show_task: row.get(11)?,
                 },
                 row.get(4)?,
                 row.get(5)?,
@@ -181,6 +185,7 @@ fn save_settings_to(connection: &Connection, settings: &Settings) -> Result<(), 
         "UPDATE application_settings SET close_to_tray = ?1, show_mascot = ?2, friendly_messages = ?3,
          notifications_enabled = ?4, notification_thresholds = ?5, hidden_provider_ids = ?6,
          mini_bar_enabled = ?7, mini_bar_opacity = ?8, mini_bar_x = ?9, mini_bar_y = ?10,
+         mini_bar_show_github = ?11, mini_bar_show_task = ?12,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
         params![
             settings.close_to_tray,
@@ -193,6 +198,8 @@ fn save_settings_to(connection: &Connection, settings: &Settings) -> Result<(), 
             settings.mini_bar_opacity,
             settings.mini_bar_x,
             settings.mini_bar_y,
+            settings.mini_bar_show_github,
+            settings.mini_bar_show_task,
         ],
     )?;
     if changed != 1 {
@@ -303,6 +310,8 @@ mod tests {
             mini_bar_opacity: 0.75,
             mini_bar_x: Some(120),
             mini_bar_y: Some(-40),
+            mini_bar_show_github: true,
+            mini_bar_show_task: true,
         };
         save_settings(&path, &changed)?;
         assert_eq!(initialize(&path)?, changed);

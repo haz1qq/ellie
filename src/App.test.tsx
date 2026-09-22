@@ -66,6 +66,8 @@ const initial = {
   miniBarOpacity: 0.9,
   miniBarX: null as number | null,
   miniBarY: null as number | null,
+  miniBarShowGitHub: false,
+  miniBarShowTask: false,
 };
 
 const initialAnalytics = {

@@ -3520,6 +3520,89 @@ body[data-window="mini"] #root {
   color: #f3b7b9;
 }
 
+/* ------------------------------ expanded HUD ------------------------------ */
+
+.mini-bands {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mini-band {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.mini-band-quota {
+  height: 96px;
+}
+
+.mini-band-task {
+  height: 52px;
+  border-top: 1px solid var(--border);
+}
+
+.mini-band-github {
+  height: 76px;
+  border-top: 1px solid var(--border);
+}
+
+.mini-section-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  color: var(--text);
+}
+
+.mini-section-button:hover:not(:disabled) {
+  background: #ffffff08;
+}
+
+.mini-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+}
+
+.mini-section-chevron {
+  color: var(--pink);
+}
+
+.mini-section-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.mini-task-title {
+  font-weight: 600;
+}
+
+.mini-section-button:focus-visible {
+  outline-offset: -2px;
+}
+
 /* ----------------------------- task sticky note --------------------------- */
 
 html[data-window="task-note"] {

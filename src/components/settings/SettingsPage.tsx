@@ -158,6 +158,18 @@ export function SettingsPage({
                   </span>
                 </label>
                 <Setting
+                  label="Show current task in mini bar"
+                  detail="Adds the pinned task title to the mini bar. Task content can appear in screen sharing; there is no capture-exclusion guarantee."
+                  checked={draft.miniBarShowTask}
+                  onChange={(value) => setDraft({ ...draft, miniBarShowTask: value })}
+                />
+                <Setting
+                  label="Show GitHub activity in mini bar"
+                  detail="Adds the loaded commit count and freshness to the mini bar using data Ellie already fetched; the mini bar never polls GitHub itself."
+                  checked={draft.miniBarShowGitHub}
+                  onChange={(value) => setDraft({ ...draft, miniBarShowGitHub: value })}
+                />
+                <Setting
                   label="Show dashboard mascot"
                   detail="A little black-and-white company. Always still, never distracting."
                   checked={draft.showMascot}

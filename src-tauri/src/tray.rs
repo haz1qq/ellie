@@ -9,14 +9,20 @@ use tauri::{
 use crate::commands::AppState;
 
 pub(crate) fn open_main(app: &tauri::AppHandle, settings: bool) -> tauri::Result<()> {
+    open_main_view(app, if settings { "settings" } else { "dashboard" })
+}
+
+/// Shows the main window and navigates it to a bounded destination. Unknown
+/// destinations are ignored by callers; the mini command validates first.
+pub(crate) fn open_main_view(app: &tauri::AppHandle, view: &str) -> tauri::Result<()> {
     app.state::<AppState>()
         .settings_view
-        .store(settings, Ordering::Relaxed);
+        .store(view == "settings", Ordering::Relaxed);
     if let Some(window) = app.get_webview_window("main") {
         window.unminimize()?;
         window.show()?;
         window.set_focus()?;
-        window.emit("navigate", if settings { "settings" } else { "dashboard" })?;
+        window.emit("navigate", view)?;
     }
     Ok(())
 }

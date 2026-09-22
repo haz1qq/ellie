@@ -44,8 +44,28 @@ pub struct Bootstrap {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MiniBootstrap {
-    settings: Settings,
-    providers: Vec<ProviderOverview>,
+    pub settings: Settings,
+    pub providers: Vec<ProviderOverview>,
+    /// Present only when the HUD task section is enabled.
+    pub task: Option<MiniTaskProjection>,
+    /// Present only when the HUD GitHub section is enabled.
+    pub github: Option<MiniGitHubProjection>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiniTaskProjection {
+    pub task_id: i64,
+    pub title: String,
+    pub kind: crate::tasks::TaskKind,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiniGitHubProjection {
+    pub state: String,
+    pub account_login: Option<String>,
+    pub summary: Option<crate::github::HudCommitSummary>,
 }
 
 #[tauri::command]
@@ -80,9 +100,45 @@ pub async fn get_mini_bootstrap(state: State<'_, AppState>) -> Result<MiniBootst
         .cached_response(&state.provider_registry, false)
         .await
         .providers;
+    // Disabled HUD sections never receive their payloads.
+    let task = if settings.mini_bar_show_task {
+        let tasks = Arc::clone(&state.tasks);
+        tauri::async_runtime::spawn_blocking(move || tasks.pinned_task())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+            .map(|task| MiniTaskProjection {
+                task_id: task.id,
+                title: task.title,
+                kind: task.kind,
+            })
+    } else {
+        None
+    };
+    let github = if settings.mini_bar_show_github {
+        let status = state.github.connection_status().await.ok();
+        let summary = state.github.hud_commit_summary().await;
+        status.map(|status| {
+            let state_label = match status.state {
+                crate::github::GitHubConnectionState::Connected => "Connected",
+                crate::github::GitHubConnectionState::Authorizing => "Authorizing",
+                crate::github::GitHubConnectionState::Disconnected => "Disconnected",
+            };
+            MiniGitHubProjection {
+                state: state_label.to_string(),
+                account_login: status.account.map(|account| account.login),
+                summary,
+            }
+        })
+    } else {
+        None
+    };
     Ok(MiniBootstrap {
         settings,
         providers,
+        task,
+        github,
     })
 }
 
@@ -164,6 +220,24 @@ pub async fn save_settings(
     }
     tracing::info!(event = "settings_saved");
     Ok(saved)
+}
+
+#[tauri::command]
+pub fn open_main_section(app: tauri::AppHandle, view: String) -> Result<(), AppError> {
+    let view = view.as_str();
+    if ![
+        "dashboard",
+        "ai-usage",
+        "github",
+        "todos",
+        "history",
+        "settings",
+    ]
+    .contains(&view)
+    {
+        return Ok(());
+    }
+    crate::tray::open_main_view(&app, view).map_err(|_| AppError::Window)
 }
 
 #[tauri::command]
@@ -305,6 +379,12 @@ fn require_task_note_window(label: &str) -> Result<(), crate::tasks::TaskError> 
 }
 
 async fn sync_task_note(app: &AppHandle, tasks: Arc<crate::tasks::TaskService>) {
+    if let Err(error) = crate::task_note::notify_main(app) {
+        tracing::warn!(event = "task_main_notify_failed", error = ?error);
+    }
+    if let Err(error) = crate::task_note::notify_mini(app) {
+        tracing::warn!(event = "task_mini_notify_failed", error = ?error);
+    }
     let snapshot = tauri::async_runtime::spawn_blocking(move || tasks.task_note_snapshot()).await;
     match snapshot {
         Ok(Ok(snapshot)) => {

@@ -41,6 +41,14 @@ pub fn notify_main(app: &tauri::AppHandle) -> Result<(), AppError> {
         .map_err(|_| AppError::Window)
 }
 
+/// Keeps the expanded HUD's current-task section fresh after task changes.
+pub fn notify_mini(app: &tauri::AppHandle) -> Result<(), AppError> {
+    app.get_webview_window(super::mini_bar::WINDOW_LABEL)
+        .ok_or(AppError::Window)?
+        .emit(TASKS_UPDATED_EVENT, ())
+        .map_err(|_| AppError::Window)
+}
+
 fn restore_position(window: &WebviewWindow, saved: Option<(i32, i32)>) -> Result<(), AppError> {
     let size = window.outer_size().map_err(|_| AppError::Window)?;
     let monitors = window.available_monitors().map_err(|_| AppError::Window)?;

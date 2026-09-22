@@ -130,7 +130,7 @@ pub fn run() -> Result<(), AppError> {
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 17);
+            tracing::info!(event = "app_started", schema_version = 18);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -139,6 +139,7 @@ pub fn run() -> Result<(), AppError> {
             commands::get_bootstrap,
             commands::get_mini_bootstrap,
             commands::open_main_window,
+            commands::open_main_section,
             commands::get_analytics,
             commands::save_settings,
             commands::hide_to_tray,

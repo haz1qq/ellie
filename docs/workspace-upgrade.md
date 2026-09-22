@@ -2,7 +2,7 @@
 
 ## Status and approved scope
 
-**Implemented on `feat/workspace-github` and merged to `main`.** W1–W5 are complete; W6 (expanded HUD) remains pending. The owner selected:
+**Implemented on `feat/workspace-github` and merged to `main`.** W1–W6 are complete. The owner selected:
 
 - GitHub **track + create**: view authorized public/private repositories, track pushed commits, and create repositories.
 - **Local to-do board**: private Work/Personal tasks with details, completion, priority, due dates, optional Work repository links, and one desktop sticky-note pin; no issue synchronization.
@@ -191,7 +191,7 @@ HUD receives only the configured summary through narrow read/navigation permissi
 
 ## 6. Delivery plan and acceptance gates
 
-W1–W5 are implemented and merged to `main`; W6 remains planned. Retain existing milestone history and do not treat automated fixtures as live GitHub verification.
+W1–W6 are implemented and merged to `main`; native DPI/interaction checks remain manual. Retain existing milestone history and do not treat automated fixtures as live GitHub verification.
 
 | Phase | Deliverable | Gate |
 | --- | --- | --- |
@@ -200,7 +200,7 @@ W1–W5 are implemented and merged to `main`; W6 remains planned. Retain existin
 | W3 | Personal repository creation — implemented, live create pending | Explicit review/confirmation; duplicate submission and ambiguous outcome tests pass; real authorized repository creation requires owner consent |
 | W4 | Local lists/tasks and persistence — implemented | Offline CRUD, restart persistence, failed saves, date boundaries, pin clearing, populated migration, and repository-link retention tests pass |
 | W5 | Integrated Overview and detailed navigation — implemented | Existing AI/history/settings behavior preserved; six-view library-backed shell, scoped commit pagination, account-wide profile contribution calendar, and accessible states implemented |
-| W6 | Expand existing HUD — pending | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, DPI/multi-monitor dragging and clean quit verified |
+| W6 | Expand existing HUD — implemented | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, and content-aware sizing verified in automated and contract tests; DPI/multi-monitor dragging and clean quit remain manual smoke checks |
 
 Dashboard sketches and review can precede implementation phases. Each implemented phase must include usable main-window UI rather than accumulating backend-only work until W5.
 
@@ -219,7 +219,7 @@ No version bump, installer identity change, API contract expansion, code depende
 
 ## 7. Consolidated design decisions
 
-Proposed choices from specialist synthesis. The W5 decisions are implemented; HUD-specific items remain pending W6:
+Proposed choices from specialist synthesis. The W5 decisions are implemented; HUD-specific items were implemented in W6:
 
 - Preserve per-provider/window rows on Overview rather than a misleading cross-provider quota score.
 - Expand native typed navigation for section-specific HUD links; retain existing tray and main-window restore behavior.
@@ -231,10 +231,10 @@ Proposed choices from specialist synthesis. The W5 decisions are implemented; HU
 
 ## 8. Review checklist
 
-Approvals for the implemented W1–W5 decisions were granted during delivery; HUD opt-in/privacy behavior remains a W6 decision.
+Approvals for the implemented W1–W5 decisions were granted during delivery; HUD opt-in/privacy behavior was approved and implemented in W6.
 
 - [x] Approve proposed dashboard navigation and layouts.
 - [x] Approve default-branch commit coverage and personal-account-only repository creation for the first delivery.
 - [x] Approve the W1 authentication mechanism (done: **GitHub App + PKCE**, see [decision record](workspace-github-auth.md) and [W2 registration doc](workspace-github-app-registration.md)); the app registration checklist in W2 was completed before implementation.
-- [ ] Approve task interaction defaults and HUD opt-in/privacy behavior (task defaults are implemented; HUD privacy is W6).
+- [x] Approve task interaction defaults and HUD opt-in/privacy behavior (implemented in W6).
 - [x] Authorize one implementation phase explicitly.

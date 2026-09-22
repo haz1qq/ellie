@@ -30,6 +30,8 @@ export interface Settings {
   miniBarOpacity: number;
   miniBarX: number | null;
   miniBarY: number | null;
+  miniBarShowGitHub: boolean;
+  miniBarShowTask: boolean;
 }
 export interface Bootstrap {
   settings: Settings;
@@ -39,6 +41,33 @@ export interface Bootstrap {
 export interface MiniBootstrap {
   settings: Settings;
   providers: ProviderOverview[];
+  /** Present only when the HUD task section is enabled. */
+  task: MiniTaskProjection | null;
+  /** Present only when the HUD GitHub section is enabled. */
+  github: MiniGitHubProjection | null;
+}
+
+export interface MiniTaskProjection {
+  taskId: number;
+  title: string;
+  kind: TaskKind;
+}
+
+/** Matches the Rust GitHubConnectionState verbatim serialization. */
+export type MiniGitHubState = "Connected" | "Authorizing" | "Disconnected";
+
+export interface MiniGitHubProjection {
+  state: MiniGitHubState;
+  accountLogin: string | null;
+  summary: MiniCommitSummary | null;
+}
+
+export interface MiniCommitSummary {
+  totalLoaded: number;
+  attributed: number;
+  repositoriesChecked: number;
+  fetchedAt: string;
+  ageSeconds: number;
 }
 
 export type MetricSource = "provider_reported" | "locally_calculated";
@@ -347,6 +376,8 @@ export const desktop = {
   bootstrap: () => invoke<Bootstrap>("get_bootstrap"),
   miniBootstrap: () => invoke<MiniBootstrap>("get_mini_bootstrap"),
   openMainWindow: () => invoke<void>("open_main_window"),
+  openMainSection: (view: View) =>
+    invoke<void>("open_main_section", { view }),
   getAnalytics: (range: AnalyticsRange) =>
     invoke<AnalyticsResponse>("get_analytics", { range }),
   saveSettings: (settings: Settings) =>
@@ -360,6 +391,8 @@ export const desktop = {
     ),
   onMiniSettingsUpdated: (callback: (settings: Settings) => void) =>
     listen<Settings>("mini-settings-updated", (event) => callback(event.payload)),
+  onMiniRefresh: (callback: () => void) =>
+    listen<void>("mini-refresh", () => callback()),
   onTasksUpdated: (callback: () => void) =>
     listen<void>("tasks-updated", () => callback()),
   onTaskNoteUpdated: (callback: (task: TaskItem | null) => void) =>

@@ -14,11 +14,11 @@ The milestones and checklists describe intended deliverables, not completed impl
 
 Work on one explicitly agreed milestone or scoped task at a time. Do not proceed to the next milestone without instruction.
 
-## Workspace expansion — implemented through W5, W6 pending
+## Workspace expansion — implemented through W6
 
 The owner has selected an expansion alongside existing AI monitoring: authorized GitHub repository/commit tracking and repository creation, a private local Work/Personal task board with one pinned sticky note, an improved dashboard, and an expanded optional mini HUD. “Full GitHub access” is narrowed to **track + create**, not unrestricted administration, code editing, or deletion.
 
-See [workspace upgrade plan](docs/workspace-upgrade.md), [interface design](docs/workspace-interface.md), [backend design](docs/workspace-backend.md), and [GitHub authentication design](docs/workspace-github-auth.md). The GitHub App authentication foundation, secure credentials, connection persistence, repository/commit reads, personal repository prepare/confirm flow, single local task board, least-privilege pinned-task sticky window, and library-backed command-center main app are implemented on `feat/workspace-github` and merged to `main`; live sign-in, an owner-authorized live repository creation, and multi-repository commit loading have succeeded. Restart restoration, refresh-token rotation, and disconnect cleanup still need recorded verification. The expanded mini HUD (W6) remains a future phase.
+See [workspace upgrade plan](docs/workspace-upgrade.md), [interface design](docs/workspace-interface.md), [backend design](docs/workspace-backend.md), and [GitHub authentication design](docs/workspace-github-auth.md). The GitHub App authentication foundation, secure credentials, connection persistence, repository/commit reads, personal repository prepare/confirm flow, single local task board, least-privilege pinned-task sticky window, library-backed command-center main app, and expanded mini HUD (W6) are implemented and merged to `main`; live sign-in, an owner-authorized live repository creation, and multi-repository commit loading have succeeded. Restart restoration, refresh-token rotation, and disconnect cleanup still need recorded verification. Native DPI/interaction smoke checks for the expanded HUD remain manual.
 
 This supplements the original AI-first product scope rather than replacing its trust, privacy, or compatibility requirements. Existing AI monitoring and local API/CLI contracts remain intact.
 

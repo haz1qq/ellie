@@ -1,6 +1,6 @@
 # Architecture
 
-The main-window workspace expansion is implemented through W5 and merged to `main`; see [backend design](workspace-backend.md) and the [W1–W6 upgrade plan](workspace-upgrade.md). GitHub and local tasks remain separate domains from AI usage. The expanded HUD (W6) is still pending.
+The main-window workspace expansion is implemented through W6 and merged to `main`; see [backend design](workspace-backend.md) and the [W1–W6 upgrade plan](workspace-upgrade.md). GitHub and local tasks remain separate domains from AI usage. The expanded HUD (W6) is implemented; only native DPI/interaction smoke checks remain manual.
 
 The Tauri 2 executable owns application lifecycle, the Windows tray, settings, SQLite, and the provider framework. React consumes narrow Rust commands through `src/lib/desktop.ts`. The frontend does not receive filesystem paths, raw database access, or provider authentication.
 

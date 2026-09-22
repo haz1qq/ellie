@@ -1,8 +1,16 @@
-use tauri::{Manager, PhysicalPosition, WebviewWindow};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 use crate::{error::AppError, settings::Settings};
 
 pub const WINDOW_LABEL: &str = "mini";
+pub const REFRESH_EVENT: &str = "mini-refresh";
+
+/// Base quota-only dimensions preserved from the original mini bar.
+pub const BASE_WIDTH: u32 = 480;
+pub const BASE_HEIGHT: u32 = 96;
+/// Per-section band heights for the expanded HUD.
+pub const TASK_BAND_HEIGHT: u32 = 52;
+pub const GITHUB_BAND_HEIGHT: u32 = 76;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct WorkArea {
@@ -12,19 +20,59 @@ struct WorkArea {
     height: u32,
 }
 
+pub fn target_size(settings: &Settings) -> (u32, u32) {
+    let height = BASE_HEIGHT
+        + if settings.mini_bar_show_task {
+            TASK_BAND_HEIGHT
+        } else {
+            0
+        }
+        + if settings.mini_bar_show_github {
+            GITHUB_BAND_HEIGHT
+        } else {
+            0
+        };
+    (BASE_WIDTH, height)
+}
+
 pub fn apply(app: &tauri::AppHandle, settings: &Settings) -> Result<(), AppError> {
     let window = app
         .get_webview_window(WINDOW_LABEL)
         .ok_or(AppError::Window)?;
     if settings.mini_bar_enabled {
+        let (width, height) = clamp_size(target_size(settings), &window)?;
+        let current = window.outer_size().map_err(|_| AppError::Window)?;
+        if current.width != width || current.height != height {
+            window
+                .set_size(PhysicalSize::new(width, height))
+                .map_err(|_| AppError::Window)?;
+        }
         if !window.is_visible().map_err(|_| AppError::Window)? {
             restore_position(&window, settings)?;
         }
         window.show().map_err(|_| AppError::Window)?;
+        window
+            .emit(REFRESH_EVENT, ())
+            .map_err(|_| AppError::Window)?;
     } else {
         window.hide().map_err(|_| AppError::Window)?;
     }
     Ok(())
+}
+
+fn clamp_size((width, height): (u32, u32), window: &WebviewWindow) -> Result<(u32, u32), AppError> {
+    let monitors = window.available_monitors().map_err(|_| AppError::Window)?;
+    let max_height = monitors
+        .iter()
+        .map(|monitor| monitor.work_area().size.height)
+        .max()
+        .unwrap_or(height);
+    let max_width = monitors
+        .iter()
+        .map(|monitor| monitor.work_area().size.width)
+        .max()
+        .unwrap_or(width);
+    Ok((width.min(max_width), height.min(max_height)))
 }
 
 fn restore_position(window: &WebviewWindow, settings: &Settings) -> Result<(), AppError> {
@@ -106,7 +154,34 @@ fn to_i32(value: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_position, WorkArea};
+    use super::{
+        safe_position, target_size, WorkArea, BASE_HEIGHT, GITHUB_BAND_HEIGHT, TASK_BAND_HEIGHT,
+    };
+
+    fn settings(show_task: bool, show_github: bool) -> crate::settings::Settings {
+        serde_json::from_str(&format!(
+            r#"{{"closeToTray":true,"showMascot":true,"friendlyMessages":true,
+            "miniBarShowTask":{show_task},"miniBarShowGitHub":{show_github}}}"#
+        ))
+        .expect("defaults")
+    }
+
+    #[test]
+    fn size_is_quota_only_by_default_and_grows_per_enabled_section() {
+        assert_eq!(target_size(&settings(false, false)), (480, BASE_HEIGHT));
+        assert_eq!(
+            target_size(&settings(true, false)),
+            (480, BASE_HEIGHT + TASK_BAND_HEIGHT)
+        );
+        assert_eq!(
+            target_size(&settings(false, true)),
+            (480, BASE_HEIGHT + GITHUB_BAND_HEIGHT)
+        );
+        assert_eq!(
+            target_size(&settings(true, true)),
+            (480, BASE_HEIGHT + TASK_BAND_HEIGHT + GITHUB_BAND_HEIGHT)
+        );
+    }
 
     const PRIMARY: WorkArea = WorkArea {
         x: 0,

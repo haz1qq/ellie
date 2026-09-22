@@ -5,6 +5,7 @@ import MiniBar from "./MiniBar";
 import { selectMiniQuotaMetrics } from "../lib/miniQuota";
 import {
   desktop,
+  type MiniBootstrap,
   type ProviderOverview,
   type Settings,
 } from "../lib/desktop";
@@ -22,8 +23,11 @@ vi.mock("../lib/desktop", () => ({
     available: vi.fn(),
     miniBootstrap: vi.fn(),
     openMainWindow: vi.fn(),
+    openMainSection: vi.fn(),
     onProvidersUpdated: vi.fn(),
     onMiniSettingsUpdated: vi.fn(),
+    onMiniRefresh: vi.fn(),
+    onTasksUpdated: vi.fn(),
   },
 }));
 
@@ -38,6 +42,8 @@ const settings: Settings = {
   miniBarOpacity: 0.65,
   miniBarX: null,
   miniBarY: null,
+  miniBarShowGitHub: false,
+  miniBarShowTask: false,
 };
 
 function provider(
@@ -90,10 +96,15 @@ beforeEach(() => {
   vi.mocked(desktop.miniBootstrap).mockResolvedValue({
     settings,
     providers: [provider()],
+    task: null,
+    github: null,
   });
   vi.mocked(desktop.openMainWindow).mockResolvedValue(undefined);
   vi.mocked(desktop.onProvidersUpdated).mockResolvedValue(() => {});
   vi.mocked(desktop.onMiniSettingsUpdated).mockResolvedValue(() => {});
+  vi.mocked(desktop.onMiniRefresh).mockResolvedValue(() => {});
+  vi.mocked(desktop.onTasksUpdated).mockResolvedValue(() => {});
+  vi.mocked(desktop.openMainSection).mockResolvedValue(undefined);
 });
 
 describe("mini quota selection", () => {
@@ -176,6 +187,8 @@ describe("mini bar", () => {
         error: "unavailable",
         lastSuccessfulRefresh: "2026-01-01T00:00:00Z",
       })],
+      task: null,
+      github: null,
     });
     render(<MiniBar />);
     expect(await screen.findByText("60% remaining")).toBeVisible();
@@ -190,7 +203,12 @@ describe("mini bar", () => {
     [[provider(null)], settings, "Quota remaining not reported"],
     [[{ ...provider(20), snapshot: { ...provider(20).snapshot!, capabilities: { ...provider(20).snapshot!.capabilities, quotaWindows: false } } }], settings, "No provider-reported quota windows"],
   ] as [ProviderOverview[], Settings, string][])("renders the distinct empty state %#", async (providers, bootstrapSettings, message) => {
-    vi.mocked(desktop.miniBootstrap).mockResolvedValue({ settings: bootstrapSettings, providers });
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: bootstrapSettings,
+      providers,
+      task: null,
+      github: null,
+    });
     render(<MiniBar />);
     expect(await screen.findByText(message)).toBeVisible();
   });
@@ -210,7 +228,7 @@ describe("mini bar", () => {
   it("does not let late bootstrap state overwrite newer provider or settings events", async () => {
     let updateProviders: ((providers: ProviderOverview[]) => void) | undefined;
     let updateSettings: ((settings: Settings) => void) | undefined;
-    let resolveBootstrap: ((value: { settings: Settings; providers: ProviderOverview[] }) => void) | undefined;
+    let resolveBootstrap: ((value: MiniBootstrap) => void) | undefined;
     vi.mocked(desktop.onProvidersUpdated).mockImplementation(async (callback) => {
       updateProviders = callback;
       return () => {};
@@ -232,7 +250,7 @@ describe("mini bar", () => {
       updateProviders?.([provider(42)]);
       updateSettings?.({ ...settings, miniBarOpacity: 0.8 });
     });
-    act(() => resolveBootstrap?.({ settings, providers: [provider(75)] }));
+    act(() => resolveBootstrap?.({ settings, providers: [provider(75)], task: null, github: null }));
 
     expect(await screen.findByText("42% remaining")).toBeVisible();
     expect(screen.queryByText("75% remaining")).not.toBeInTheDocument();
@@ -258,5 +276,75 @@ describe("mini bar", () => {
     render(<MiniBar />);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Quota unavailable"));
     expect(screen.queryByText("database path")).not.toBeInTheDocument();
+  });
+});
+
+describe("expanded HUD sections", () => {
+  it("renders the pinned task section and opens the to-do view", async () => {
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: { ...settings, miniBarShowTask: true },
+      providers: [provider()],
+      task: { taskId: 3, title: "Ship W6", kind: "work" },
+      github: null,
+    });
+    const user = userEvent.setup();
+    render(<MiniBar />);
+    expect(await screen.findByText(/Work ·/)).toBeVisible();
+    expect(screen.getByText("Ship W6")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Current task/ }));
+    expect(desktop.openMainSection).toHaveBeenCalledWith("todos");
+  });
+
+  it("says no current task when none is pinned", async () => {
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: { ...settings, miniBarShowTask: true },
+      providers: [provider()],
+      task: null,
+      github: null,
+    });
+    render(<MiniBar />);
+    expect(await screen.findByText("No current task")).toBeVisible();
+  });
+
+  it("renders the GitHub section with cached commit scope and opens GitHub", async () => {
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: { ...settings, miniBarShowGitHub: true },
+      providers: [provider()],
+      task: null,
+      github: {
+        state: "Connected",
+        accountLogin: "octocat",
+        summary: {
+          totalLoaded: 6,
+          attributed: 4,
+          repositoriesChecked: 3,
+          fetchedAt: new Date().toISOString(),
+          ageSeconds: 30,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<MiniBar />);
+    expect(await screen.findByText("6 commits · 3 repos · 4 yours")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^GitHub activity/ }));
+    expect(desktop.openMainSection).toHaveBeenCalledWith("github");
+  });
+
+  it("keeps disabled sections hidden and without payloads", async () => {
+    render(<MiniBar />);
+    expect(await screen.findByText("75% remaining")).toBeVisible();
+    expect(screen.queryByText("Current task")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub activity")).not.toBeInTheDocument();
+  });
+
+  it("shows distinct disconnected GitHub state without inventing commits", async () => {
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: { ...settings, miniBarShowGitHub: true },
+      providers: [provider()],
+      task: null,
+      github: { state: "Disconnected", accountLogin: null, summary: null },
+    });
+    render(<MiniBar />);
+    expect(await screen.findByText("Connect GitHub in Ellie")).toBeVisible();
   });
 });

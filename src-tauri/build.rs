@@ -6,6 +6,7 @@ fn main() {
             "get_bootstrap",
             "get_mini_bootstrap",
             "open_main_window",
+            "open_main_section",
             "get_analytics",
             "save_settings",
             "hide_to_tray",

@@ -184,6 +184,7 @@ describe("credential IPC permissions", () => {
       "core:window:allow-start-dragging",
       "allow-get-mini-bootstrap",
       "allow-open-main-window",
+      "allow-open-main-section",
     ]);
     for (const forbidden of [
       "allow-local-api-status",

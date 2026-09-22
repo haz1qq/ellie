@@ -1,6 +1,6 @@
 # Workspace backend design
 
-**Status: implemented through W4; expanded HUD backend pending.** Companion to the [workspace upgrade plan](workspace-upgrade.md) and [interface design](workspace-interface.md). The GitHub authentication/read service, personal repository prepare/confirm flow, and local task persistence are implemented on `feat/workspace-github` and merged to `main`; live repository creation was verified by the owner.
+**Status: implemented through W6; expanded HUD backend implemented.** Companion to the [workspace upgrade plan](workspace-upgrade.md) and [interface design](workspace-interface.md). The GitHub authentication/read service, personal repository prepare/confirm flow, local task persistence, and the expanded HUD projections are implemented and merged to `main`; live repository creation was verified by the owner.
 
 ## Existing boundaries and planned extension
 
@@ -95,7 +95,7 @@ Keep `/api/v1` and `ellie-cli` behavior unchanged. Workspace content is not auto
 
 Propose separate revisioned, window-targeted GitHub/task updates and cached bootstraps. Subscribe before bootstrap and reconcile revisions to avoid missing updates or replacing newer state with older bootstrap results. Revision/session changes must clear obsolete content. Neither event handling nor HUD opening triggers network work.
 
-HUD projection includes only enabled sections: loaded personal count with scope/coverage/age, and current task title with minimal display metadata. Exclude notes, credentials, commit subjects and unnecessary private metadata. Disabled sections should not receive their payloads.
+HUD projection includes only enabled sections: loaded personal count with scope/coverage/age, and current task title with minimal display metadata. Exclude notes, credentials, commit subjects and unnecessary private metadata. Disabled sections should not receive their payloads. Implemented: `get_mini_bootstrap` reads gated `task` and `github` projections; the GitHub projection is a shared in-memory cache updated only when the main window loads commit lists, so the HUD never polls; the task projection is a pinned-task title read locally.
 
 Extend native navigation with a bounded destination enum for Overview/AI Usage/GitHub/To-do/History/Settings while preserving tray restore and existing entry points. HUD permits only cached reads, relevant event subscriptions, dragging and bounded main-window navigation. No auth, task writes, creation, refresh, database access or arbitrary external URL opening.
 

@@ -16,7 +16,7 @@ use std::{
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{Datelike, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Utc};
 use reqwest::{
     header::{self, HeaderMap},
     Client, StatusCode, Url,
@@ -341,6 +341,40 @@ pub struct GitHubService {
     repository_creation_gate: tokio::sync::Mutex<()>,
     request_timeout: Duration,
     limits: ServiceLimits,
+    hud_commits: std::sync::Mutex<HudCommitCache>,
+}
+
+/// Bounded in-memory record of the repositories whose commit lists were
+/// actually loaded by the main window. The HUD reads this shared cache only;
+/// it never triggers network work or SQLite access itself.
+#[derive(Default)]
+struct HudCommitCache {
+    /// Repository full name → (loaded commit count, attributed commit count).
+    repos: std::collections::HashMap<String, (u64, u64)>,
+    last_fetched_at: Option<DateTime<Utc>>,
+}
+
+impl HudCommitCache {
+    fn record(&mut self, full_name: String, loaded: usize, attributed: usize, now: DateTime<Utc>) {
+        self.repos
+            .insert(full_name, (loaded as u64, attributed as u64));
+        self.last_fetched_at = Some(now);
+    }
+
+    fn clear(&mut self) {
+        self.repos.clear();
+        self.last_fetched_at = None;
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HudCommitSummary {
+    pub total_loaded: u64,
+    pub attributed: u64,
+    pub repositories_checked: usize,
+    pub fetched_at: DateTime<Utc>,
+    pub age_seconds: u64,
 }
 
 impl GitHubService {
@@ -389,6 +423,7 @@ impl GitHubService {
             repository_creation_gate: tokio::sync::Mutex::new(()),
             request_timeout: REQUEST_TIMEOUT,
             limits: ServiceLimits::default(),
+            hud_commits: std::sync::Mutex::new(HudCommitCache::default()),
         }
     }
 
@@ -409,6 +444,47 @@ impl GitHubService {
             client_id_configured,
             client_secret_configured,
         })
+    }
+
+    /// Shared HUD projection: never performs network or database work. Returns
+    /// `None` when no commit list has been loaded since connect.
+    pub async fn hud_commit_summary(&self) -> Option<HudCommitSummary> {
+        let cache = self.hud_commits.lock().ok()?;
+        let fetched_at = cache.last_fetched_at?;
+        let total_loaded = cache.repos.values().map(|(loaded, _)| *loaded).sum();
+        let attributed = cache
+            .repos
+            .values()
+            .map(|(_, attributed)| *attributed)
+            .sum();
+        let age_seconds = (Utc::now() - fetched_at).num_seconds().max(0) as u64;
+        Some(HudCommitSummary {
+            total_loaded,
+            attributed,
+            repositories_checked: cache.repos.len(),
+            fetched_at,
+            age_seconds,
+        })
+    }
+
+    fn record_hud_commits(&self, owner: &str, repository: &str, rows: &[CommitSummary]) {
+        let account_id = self
+            .connection
+            .lock()
+            .ok()
+            .and_then(|connection| connection.account.clone())
+            .map(|account| account.id);
+        let attributed = account_id
+            .map(|id| rows.iter().filter(|row| row.author_id == Some(id)).count())
+            .unwrap_or(0);
+        if let Ok(mut cache) = self.hud_commits.lock() {
+            cache.record(
+                format!("{owner}/{repository}"),
+                rows.len(),
+                attributed,
+                Utc::now(),
+            );
+        }
     }
 
     pub async fn restore_if_needed(&self) -> Result<(), GitHubError> {
@@ -892,6 +968,9 @@ impl GitHubService {
         if let Ok(mut connection) = self.connection.lock() {
             *connection = ConnectionRecord::default();
         }
+        if let Ok(mut hud) = self.hud_commits.lock() {
+            hud.clear();
+        }
 
         let token_result = self.delete_refresh_token().await;
         let secret_result = self.delete_client_secret().await;
@@ -952,6 +1031,9 @@ impl GitHubService {
             .list_commits_inner(owner, repository, branch, self.limits.max_rows)
             .await;
         self.record_result(&result);
+        if let Ok(rows) = &result {
+            self.record_hud_commits(owner, repository, rows);
+        }
         result
     }
 
@@ -966,6 +1048,9 @@ impl GitHubService {
             .list_commits_inner(owner, repository, branch, max_rows)
             .await;
         self.record_result(&result);
+        if let Ok(rows) = &result {
+            self.record_hud_commits(owner, repository, rows);
+        }
         result
     }
 
@@ -2972,6 +3057,49 @@ mod tests {
         assert!(request.starts_with("GET /repos/octo-cat/ellie/commits?"));
         assert!(request.contains("per_page=2"));
         assert!(request.contains("page=1"));
+    }
+
+    #[tokio::test]
+    async fn exposes_a_shared_hud_commit_summary_without_extra_requests() {
+        let body_with_two_attributed = r#"[{"sha":"0123456789abcdef0123456789abcdef01234567","commit":{"message":"Mine","author":{"date":"2026-01-02T03:04:05Z"},"committer":{"date":"2026-01-02T04:05:06Z"}},"author":{"id":42,"login":"octo-cat"}},{"sha":"1123456789abcdef0123456789abcdef01234567","commit":{"message":"Also mine","author":{"date":"2026-01-03T03:04:05Z"},"committer":{"date":"2026-01-03T04:05:06Z"}},"author":{"id":42,"login":"octo-cat"}}]"#;
+        let body_with_one_foreign = r#"[{"sha":"2123456789abcdef0123456789abcdef01234567","commit":{"message":"Someone else","author":{"date":"2026-01-04T03:04:05Z"},"committer":{"date":"2026-01-04T04:05:06Z"}},"author":{"id":7,"login":"friend"}}]"#;
+        let (base, requests, server) = serve_sequence(vec![
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: body_with_two_attributed.to_string(),
+            },
+            MockResponse {
+                status: "200 OK",
+                headers: "",
+                body: body_with_one_foreign.to_string(),
+            },
+        ])
+        .await;
+        let store = Arc::new(MemoryStore::default());
+        let service = test_service(&base, store.clone(), ServiceLimits::default());
+        mark_connected(&service, store.as_ref()).await;
+
+        assert!(service.hud_commit_summary().await.is_none());
+
+        service
+            .list_commits("octo-cat", "ellie", None)
+            .await
+            .expect("ellie commits");
+        service
+            .list_commits("octo-cat", "notes", None)
+            .await
+            .expect("notes commits");
+        server.await.expect("mock server");
+
+        let summary = service.hud_commit_summary().await.expect("cached summary");
+        assert_eq!(summary.total_loaded, 3);
+        assert_eq!(summary.attributed, 2);
+        assert_eq!(summary.repositories_checked, 2);
+        assert!(summary.age_seconds < 60);
+        // The HUD projection is a cache read; it issues no further requests.
+        let requests = requests.lock().expect("requests");
+        assert_eq!(requests.len(), 2);
     }
 
     #[tokio::test]
