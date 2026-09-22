@@ -1,17 +1,24 @@
-use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, Size, WebviewWindow};
 
 use crate::{error::AppError, settings::Settings};
 
 pub const WINDOW_LABEL: &str = "mini";
 pub const REFRESH_EVENT: &str = "mini-refresh";
 
+// All mini bar dimensions are **logical** pixels, matching CSS units, so the
+// HUD is correct at every Windows display scaling (125%, 150%, …).
 /// Base quota-only dimensions preserved from the original mini bar.
 pub const BASE_WIDTH: u32 = 480;
 pub const BASE_HEIGHT: u32 = 96;
 /// Transparent webview padding around the bar (`body[data-window="mini"] #root`).
 pub const CONTENT_PADDING: u32 = 6;
-/// Per-section band heights for the expanded HUD.
-pub const TASK_BAND_HEIGHT: u32 = 52;
+/// The bar's own 1px top and bottom borders.
+pub const BAR_BORDER: u32 = 1;
+/// Padding plus borders: everything the window adds around the bands.
+pub const CHROME_HEIGHT: u32 = CONTENT_PADDING * 2 + BAR_BORDER * 2;
+/// Per-section band heights (logical). The task band fits a 10px label, a 12px
+/// value line, and 10px vertical padding on each side.
+pub const TASK_BAND_HEIGHT: u32 = 58;
 pub const GITHUB_BAND_HEIGHT: u32 = 76;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,7 +41,7 @@ pub fn target_size(settings: &Settings) -> (u32, u32) {
         } else {
             0
         };
-    (BASE_WIDTH, bands + CONTENT_PADDING * 2)
+    (BASE_WIDTH, bands + CHROME_HEIGHT)
 }
 
 /// The size the window should use: the user's saved size when present (never
@@ -56,18 +63,23 @@ pub fn apply(app: &tauri::AppHandle, settings: &Settings) -> Result<(), AppError
         .ok_or(AppError::Window)?;
     if settings.mini_bar_enabled {
         let (_, minimum_height) = target_size(settings);
-        // A native minimum keeps the user from shrinking below the bands.
+        let scale = window.scale_factor().map_err(|_| AppError::Window)?;
+        // A native logical minimum keeps the user from shrinking below the bands
+        // at any display scaling.
         window
-            .set_min_size(Some(PhysicalSize::new(
-                crate::settings::MIN_MINI_BAR_WIDTH,
-                minimum_height,
-            )))
+            .set_min_size(Some(Size::Logical(LogicalSize::new(
+                crate::settings::MIN_MINI_BAR_WIDTH as f64,
+                minimum_height as f64,
+            ))))
             .map_err(|_| AppError::Window)?;
-        let (width, height) = clamp_size(desired_size(settings), &window)?;
-        let current = window.outer_size().map_err(|_| AppError::Window)?;
+        let (width, height) = clamp_size(desired_size(settings), &window, scale)?;
+        let current = window
+            .outer_size()
+            .map_err(|_| AppError::Window)?
+            .to_logical::<u32>(scale);
         if current.width != width || current.height != height {
             window
-                .set_size(PhysicalSize::new(width, height))
+                .set_size(Size::Logical(LogicalSize::new(width as f64, height as f64)))
                 .map_err(|_| AppError::Window)?;
         }
         if !window.is_visible().map_err(|_| AppError::Window)? {
@@ -118,16 +130,22 @@ fn clamp_current_position(window: &WebviewWindow) -> Result<(), AppError> {
     Ok(())
 }
 
-fn clamp_size((width, height): (u32, u32), window: &WebviewWindow) -> Result<(u32, u32), AppError> {
+/// Clamps a logical size to the largest monitor work area, converting the
+/// physical work-area size into logical units for the window's scaling.
+fn clamp_size(
+    (width, height): (u32, u32),
+    window: &WebviewWindow,
+    scale: f64,
+) -> Result<(u32, u32), AppError> {
     let monitors = window.available_monitors().map_err(|_| AppError::Window)?;
     let max_height = monitors
         .iter()
-        .map(|monitor| monitor.work_area().size.height)
+        .map(|monitor| monitor.work_area().size.to_logical::<u32>(scale).height)
         .max()
         .unwrap_or(height);
     let max_width = monitors
         .iter()
-        .map(|monitor| monitor.work_area().size.width)
+        .map(|monitor| monitor.work_area().size.to_logical::<u32>(scale).width)
         .max()
         .unwrap_or(width);
     Ok((width.min(max_width), height.min(max_height)))
@@ -213,7 +231,7 @@ fn to_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        desired_size, safe_position, target_size, WorkArea, BASE_HEIGHT, CONTENT_PADDING,
+        desired_size, safe_position, target_size, WorkArea, BASE_HEIGHT, CHROME_HEIGHT,
         GITHUB_BAND_HEIGHT, TASK_BAND_HEIGHT,
     };
 
@@ -227,7 +245,7 @@ mod tests {
 
     #[test]
     fn size_is_quota_only_by_default_and_grows_per_enabled_section() {
-        let chrome = CONTENT_PADDING * 2;
+        let chrome = CHROME_HEIGHT;
         assert_eq!(
             target_size(&settings(false, false)),
             (480, BASE_HEIGHT + chrome)
@@ -260,7 +278,7 @@ mod tests {
         // user's chosen width.
         custom.mini_bar_show_task = true;
         custom.mini_bar_show_github = true;
-        let minimum = BASE_HEIGHT + TASK_BAND_HEIGHT + GITHUB_BAND_HEIGHT + CONTENT_PADDING * 2;
+        let minimum = BASE_HEIGHT + TASK_BAND_HEIGHT + GITHUB_BAND_HEIGHT + CHROME_HEIGHT;
         assert_eq!(desired_size(&custom), (640, 400.max(minimum)));
 
         // A too-small saved size is raised to the enabled bands.

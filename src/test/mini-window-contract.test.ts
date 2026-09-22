@@ -31,8 +31,8 @@ describe("mini window native contract", () => {
     );
     expect(miniWindow).toMatchObject({
       width: 480,
-      // Base 96px quota band plus the 6px transparent padding on each side.
-      height: 108,
+      // Base 96px quota band plus 6px transparent padding and 1px borders.
+      height: 110,
       minWidth: 320,
       minHeight: 96,
       resizable: true,
@@ -67,12 +67,13 @@ describe("mini window native contract", () => {
     // The quota band absorbs extra height when the user resizes the bar; the
     // section bands keep their height so text never clips.
     expect(styles).toMatch(/\.mini-band-quota[^{]*\{[^}]*min-height:\s*96px;/s);
-    expect(styles).toMatch(/\.mini-band-task[^{]*\{[^}]*flex:\s*0 0 52px;/s);
+    expect(styles).toMatch(/\.mini-band-task[^{]*\{[^}]*flex:\s*0 0 58px;/s);
     expect(styles).toMatch(/\.mini-band-github[^{]*\{[^}]*flex:\s*0 0 76px;/s);
-    // Rust derives the pixel size from the enabled bands, the webview padding,
-    // and any user-chosen size, then persists user resizes.
-    expect(miniBar).toContain("CONTENT_PADDING * 2");
+    // Rust derives the logical pixel size from the enabled bands, the webview
+    // padding and borders, and any user-chosen size, then persists resizes.
+    expect(miniBar).toContain("CHROME_HEIGHT");
     expect(miniBar).toContain("fn desired_size");
+    expect(miniBar).toContain("LogicalSize");
     expect(miniBar).toContain("set_min_size");
     expect(storage).toContain("pub fn save_mini_bar_size");
   });

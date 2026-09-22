@@ -226,13 +226,15 @@ pub fn run() -> Result<(), AppError> {
                         });
                     }
                     tauri::WindowEvent::Resized(size) => {
-                        // User-driven resizing is persisted so it survives a
-                        // restart and is never overwritten by a settings save.
-                        let width = size.width.clamp(
+                        // Persist the DPI-independent logical size so the bar
+                        // looks the same on monitors with different scaling.
+                        let scale = window.scale_factor().unwrap_or(1.0);
+                        let logical = size.to_logical::<u32>(scale);
+                        let width = logical.width.clamp(
                             crate::settings::MIN_MINI_BAR_WIDTH,
                             crate::settings::MAX_MINI_BAR_WIDTH,
                         );
-                        let height = size.height.clamp(
+                        let height = logical.height.clamp(
                             crate::settings::MIN_MINI_BAR_HEIGHT,
                             crate::settings::MAX_MINI_BAR_HEIGHT,
                         );
