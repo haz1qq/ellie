@@ -185,6 +185,12 @@ pub(crate) struct TaskNoteSnapshot {
     pub position: Option<(i32, i32)>,
 }
 
+/// Minimal HUD task projection: pinned state plus the task itself.
+pub struct HudTask {
+    pub task: TaskItem,
+    pub pinned: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListDeletePreview {
@@ -254,6 +260,34 @@ impl TaskService {
     pub fn list_tasks(&self, query: TaskQuery) -> Result<Vec<TaskItem>, TaskError> {
         validate_optional_id(query.list_id)?;
         read_tasks(&self.connect()?, &query)
+    }
+
+    /// Least-privilege HUD projection: the pinned task when it is still open,
+    /// otherwise the next open task in the same order the To-do board shows
+    /// (soonest due date, then oldest). Never returns completed tasks.
+    pub fn hud_task(&self) -> Result<Option<HudTask>, TaskError> {
+        let connection = self.connect()?;
+        if let Some(task_id) = read_pinned_task_id(&connection)? {
+            if let Ok(task) = read_task(&connection, task_id) {
+                if task.completed_at.is_none() {
+                    return Ok(Some(HudTask { task, pinned: true }));
+                }
+            }
+        }
+        let next = read_tasks(
+            &connection,
+            &TaskQuery {
+                list_id: None,
+                completion: CompletionFilter::Open,
+                priority: None,
+            },
+        )?
+        .into_iter()
+        .next();
+        Ok(next.map(|task| HudTask {
+            task,
+            pinned: false,
+        }))
     }
 
     pub fn create_list(&self, name: String) -> Result<TaskList, TaskError> {
@@ -977,6 +1011,46 @@ mod tests {
                 full_name: "octo-cat/ellie".to_string(),
             }),
         }
+    }
+
+    #[test]
+    fn hud_task_prefers_the_pinned_open_task_and_falls_back_to_the_next_one() {
+        let (_temp, service) = service();
+        let list = service.bootstrap().expect("bootstrap").lists[0].id;
+        let mut earlier = task_input(list);
+        earlier.title = "Earlier due task".to_string();
+        earlier.due_date = Some("2026-09-27".to_string());
+        let mut later = task_input(list);
+        later.title = "Later due task".to_string();
+        later.due_date = Some("2026-12-01".to_string());
+
+        let earlier = service.create_task(earlier).expect("earlier");
+        let later = service.create_task(later).expect("later");
+
+        // Nothing pinned: the next open task by due date, flagged as a fallback.
+        let next = service.hud_task().expect("hud").expect("a task");
+        assert_eq!(next.task.title, "Earlier due task");
+        assert!(!next.pinned);
+
+        // Pinning wins over the due-date order.
+        service.set_pinned(Some(later.id)).expect("pin");
+        let pinned = service.hud_task().expect("hud").expect("a task");
+        assert_eq!(pinned.task.title, "Later due task");
+        assert!(pinned.pinned);
+
+        // Completing the pinned task falls back again instead of showing it.
+        service
+            .set_completed(later.id, true)
+            .expect("complete pinned");
+        let fallback = service.hud_task().expect("hud").expect("a task");
+        assert_eq!(fallback.task.title, "Earlier due task");
+        assert!(!fallback.pinned);
+
+        // No open tasks at all means no HUD task, never a completed one.
+        service
+            .set_completed(earlier.id, true)
+            .expect("complete earlier");
+        assert!(service.hud_task().expect("hud").is_none());
     }
 
     #[test]

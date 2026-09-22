@@ -44,6 +44,8 @@ const settings: Settings = {
   miniBarY: null,
   miniBarShowGitHub: false,
   miniBarShowTask: false,
+  miniBarWidth: null,
+  miniBarHeight: null,
 };
 
 function provider(
@@ -284,7 +286,7 @@ describe("expanded HUD sections", () => {
     vi.mocked(desktop.miniBootstrap).mockResolvedValue({
       settings: { ...settings, miniBarShowTask: true },
       providers: [provider()],
-      task: { taskId: 3, title: "Ship W6", kind: "work" },
+      task: { taskId: 3, title: "Ship W6", kind: "work", pinned: true },
       github: null,
     });
     const user = userEvent.setup();
@@ -295,7 +297,20 @@ describe("expanded HUD sections", () => {
     expect(desktop.openMainSection).toHaveBeenCalledWith("todos");
   });
 
-  it("says no current task when none is pinned", async () => {
+  it("falls back to the next open task when nothing is pinned", async () => {
+    vi.mocked(desktop.miniBootstrap).mockResolvedValue({
+      settings: { ...settings, miniBarShowTask: true },
+      providers: [provider()],
+      task: { taskId: 9, title: "Ellie UI Redesign", kind: "work", pinned: false },
+      github: null,
+    });
+    render(<MiniBar />);
+    expect(await screen.findByText("Next task")).toBeVisible();
+    expect(screen.getByText("Ellie UI Redesign")).toBeVisible();
+    expect(screen.queryByText("No open tasks")).not.toBeInTheDocument();
+  });
+
+  it("says no open tasks when the board really is empty", async () => {
     vi.mocked(desktop.miniBootstrap).mockResolvedValue({
       settings: { ...settings, miniBarShowTask: true },
       providers: [provider()],
@@ -303,7 +318,7 @@ describe("expanded HUD sections", () => {
       github: null,
     });
     render(<MiniBar />);
-    expect(await screen.findByText("No current task")).toBeVisible();
+    expect(await screen.findByText("No open tasks")).toBeVisible();
   });
 
   it("renders the GitHub section with cached commit scope and opens GitHub", async () => {

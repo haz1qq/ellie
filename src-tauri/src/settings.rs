@@ -25,7 +25,16 @@ pub struct Settings {
     pub mini_bar_show_github: bool,
     #[serde(default, rename = "miniBarShowTask")]
     pub mini_bar_show_task: bool,
+    #[serde(default, rename = "miniBarWidth")]
+    pub mini_bar_width: Option<u32>,
+    #[serde(default, rename = "miniBarHeight")]
+    pub mini_bar_height: Option<u32>,
 }
+
+pub const MIN_MINI_BAR_WIDTH: u32 = 320;
+pub const MAX_MINI_BAR_WIDTH: u32 = 3840;
+pub const MIN_MINI_BAR_HEIGHT: u32 = 96;
+pub const MAX_MINI_BAR_HEIGHT: u32 = 2160;
 
 pub const DEFAULT_MINI_BAR_OPACITY: f64 = 0.9;
 pub const MIN_MINI_BAR_OPACITY: f64 = 0.5;
@@ -49,6 +58,16 @@ impl Settings {
         if !self.mini_bar_opacity.is_finite()
             || !(MIN_MINI_BAR_OPACITY..=1.0).contains(&self.mini_bar_opacity)
             || self.mini_bar_x.is_some() != self.mini_bar_y.is_some()
+        {
+            return Err(crate::error::AppError::Storage);
+        }
+        if self.mini_bar_width.is_some() != self.mini_bar_height.is_some()
+            || self
+                .mini_bar_width
+                .is_some_and(|width| !(MIN_MINI_BAR_WIDTH..=MAX_MINI_BAR_WIDTH).contains(&width))
+            || self.mini_bar_height.is_some_and(|height| {
+                !(MIN_MINI_BAR_HEIGHT..=MAX_MINI_BAR_HEIGHT).contains(&height)
+            })
         {
             return Err(crate::error::AppError::Storage);
         }
@@ -131,6 +150,8 @@ mod tests {
                 mini_bar_y: None,
                 mini_bar_show_github: false,
                 mini_bar_show_task: false,
+                mini_bar_width: None,
+                mini_bar_height: None,
             };
             assert!(settings.validate().is_err());
         }

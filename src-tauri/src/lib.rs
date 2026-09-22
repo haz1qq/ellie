@@ -98,6 +98,7 @@ pub fn run() -> Result<(), AppError> {
                 settings_view: AtomicBool::new(false),
                 settings_write: tokio::sync::Mutex::new(()),
                 mini_move_generation: AtomicU64::new(0),
+                mini_resize_generation: AtomicU64::new(0),
                 task_note_move_generation: AtomicU64::new(0),
                 provider_registry: {
                     let mut registry = providers::ProviderRegistry::default();
@@ -130,7 +131,7 @@ pub fn run() -> Result<(), AppError> {
             refresh::spawn_poller(app.handle().clone());
             spawn_history_cleanup(database_path);
             tray::create(app.handle()).map_err(|_| AppError::Startup)?;
-            tracing::info!(event = "app_started", schema_version = 18);
+            tracing::info!(event = "app_started", schema_version = 19);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -198,30 +199,67 @@ pub fn run() -> Result<(), AppError> {
                     }
                 }
             } else if window.label() == mini_bar::WINDOW_LABEL {
-                if let tauri::WindowEvent::Moved(position) = event {
-                    let state = window.state::<AppState>();
-                    let generation = state
-                        .mini_move_generation
-                        .fetch_add(1, Ordering::Relaxed)
-                        .wrapping_add(1);
-                    let app = window.app_handle().clone();
-                    let (x, y) = (position.x, position.y);
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                        let state = app.state::<AppState>();
-                        if state.mini_move_generation.load(Ordering::Relaxed) != generation {
-                            return;
-                        }
-                        let _guard = state.settings_write.lock().await;
-                        let path = state.database_path.clone();
-                        let result = tauri::async_runtime::spawn_blocking(move || {
-                            storage::save_mini_bar_position(&path, x, y)
-                        })
-                        .await;
-                        if !matches!(result, Ok(Ok(()))) {
-                            tracing::warn!(event = "mini_bar_position_save_failed");
-                        }
-                    });
+                match event {
+                    tauri::WindowEvent::Moved(position) => {
+                        let state = window.state::<AppState>();
+                        let generation = state
+                            .mini_move_generation
+                            .fetch_add(1, Ordering::Relaxed)
+                            .wrapping_add(1);
+                        let app = window.app_handle().clone();
+                        let (x, y) = (position.x, position.y);
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            let state = app.state::<AppState>();
+                            if state.mini_move_generation.load(Ordering::Relaxed) != generation {
+                                return;
+                            }
+                            let _guard = state.settings_write.lock().await;
+                            let path = state.database_path.clone();
+                            let result = tauri::async_runtime::spawn_blocking(move || {
+                                storage::save_mini_bar_position(&path, x, y)
+                            })
+                            .await;
+                            if !matches!(result, Ok(Ok(()))) {
+                                tracing::warn!(event = "mini_bar_position_save_failed");
+                            }
+                        });
+                    }
+                    tauri::WindowEvent::Resized(size) => {
+                        // User-driven resizing is persisted so it survives a
+                        // restart and is never overwritten by a settings save.
+                        let width = size.width.clamp(
+                            crate::settings::MIN_MINI_BAR_WIDTH,
+                            crate::settings::MAX_MINI_BAR_WIDTH,
+                        );
+                        let height = size.height.clamp(
+                            crate::settings::MIN_MINI_BAR_HEIGHT,
+                            crate::settings::MAX_MINI_BAR_HEIGHT,
+                        );
+                        let state = window.state::<AppState>();
+                        let generation = state
+                            .mini_resize_generation
+                            .fetch_add(1, Ordering::Relaxed)
+                            .wrapping_add(1);
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            let state = app.state::<AppState>();
+                            if state.mini_resize_generation.load(Ordering::Relaxed) != generation {
+                                return;
+                            }
+                            let _guard = state.settings_write.lock().await;
+                            let path = state.database_path.clone();
+                            let result = tauri::async_runtime::spawn_blocking(move || {
+                                storage::save_mini_bar_size(&path, width, height)
+                            })
+                            .await;
+                            if !matches!(result, Ok(Ok(()))) {
+                                tracing::warn!(event = "mini_bar_size_save_failed");
+                            }
+                        });
+                    }
+                    _ => {}
                 }
             } else if window.label() == task_note::WINDOW_LABEL {
                 match event {

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 const commands = read("src-tauri/src/commands.rs");
+const miniBar = read("src-tauri/src/mini_bar.rs");
+const storage = read("src-tauri/src/storage.rs");
 const entrypoint = read("src/main.tsx");
 const styles = read("src/styles.css");
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
@@ -29,7 +31,11 @@ describe("mini window native contract", () => {
     );
     expect(miniWindow).toMatchObject({
       width: 480,
-      height: 96,
+      // Base 96px quota band plus the 6px transparent padding on each side.
+      height: 108,
+      minWidth: 320,
+      minHeight: 96,
+      resizable: true,
       transparent: true,
       backgroundColor: "#00000000",
     });
@@ -58,10 +64,16 @@ describe("mini window native contract", () => {
     expect(commands).toContain("\"settings\",");
     const mini = read("src-tauri/capabilities/mini.json");
     expect(mini).toContain("allow-open-main-section");
-    // The base quota band keeps the original 480×96 sizing; enabled sections
-    // add fixed bands that Rust derives the window height from.
-    expect(styles).toMatch(/\.mini-band-quota[^{]*\{[^}]*height:\s*96px;/s);
-    expect(styles).toMatch(/\.mini-band-task[^{]*\{[^}]*height:\s*52px;/s);
-    expect(styles).toMatch(/\.mini-band-github[^{]*\{[^}]*height:\s*76px;/s);
+    // The quota band absorbs extra height when the user resizes the bar; the
+    // section bands keep their height so text never clips.
+    expect(styles).toMatch(/\.mini-band-quota[^{]*\{[^}]*min-height:\s*96px;/s);
+    expect(styles).toMatch(/\.mini-band-task[^{]*\{[^}]*flex:\s*0 0 52px;/s);
+    expect(styles).toMatch(/\.mini-band-github[^{]*\{[^}]*flex:\s*0 0 76px;/s);
+    // Rust derives the pixel size from the enabled bands, the webview padding,
+    // and any user-chosen size, then persists user resizes.
+    expect(miniBar).toContain("CONTENT_PADDING * 2");
+    expect(miniBar).toContain("fn desired_size");
+    expect(miniBar).toContain("set_min_size");
+    expect(storage).toContain("pub fn save_mini_bar_size");
   });
 });

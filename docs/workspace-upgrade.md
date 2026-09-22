@@ -200,7 +200,7 @@ W1–W6 are implemented and merged to `main`; native DPI/interaction checks rema
 | W3 | Personal repository creation — implemented, live create pending | Explicit review/confirmation; duplicate submission and ambiguous outcome tests pass; real authorized repository creation requires owner consent |
 | W4 | Local lists/tasks and persistence — implemented | Offline CRUD, restart persistence, failed saves, date boundaries, pin clearing, populated migration, and repository-link retention tests pass |
 | W5 | Integrated Overview and detailed navigation — implemented | Existing AI/history/settings behavior preserved; six-view library-backed shell, scoped commit pagination, account-wide profile contribution calendar, and accessible states implemented |
-| W6 | Expand existing HUD — implemented | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, and content-aware sizing verified in automated and contract tests; DPI/multi-monitor dragging and clean quit remain manual smoke checks |
+| W6 | Expand existing HUD — implemented | Shared cache only; no extra polling; scope labels, privacy toggles, navigation, content-aware sizing, and persisted user resizing verified in automated and contract tests; DPI/multi-monitor dragging and clean quit remain manual smoke checks |
 
 Dashboard sketches and review can precede implementation phases. Each implemented phase must include usable main-window UI rather than accumulating backend-only work until W5.
 

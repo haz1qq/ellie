@@ -196,7 +196,8 @@ export default function MiniBar() {
               onClick={() => void openSection("todos")}
             >
               <span className="mini-section-title">
-                Current task <ChevronRight size={12} className="mini-section-chevron" aria-hidden="true" />
+                {task?.pinned ? "Current task" : task ? "Next task" : "Current task"}{" "}
+                <ChevronRight size={12} className="mini-section-chevron" aria-hidden="true" />
               </span>
               <span className="mini-section-value" title={task?.title ?? undefined}>
                 {task ? (
@@ -205,7 +206,7 @@ export default function MiniBar() {
                     <span className="mini-task-title">{task.title}</span>
                   </>
                 ) : (
-                  "No current task"
+                  "No open tasks"
                 )}
               </span>
             </button>
@@ -335,7 +336,13 @@ function miniAccessibleStatus(
     }).join(". "));
   }
   if (task !== undefined) {
-    parts.push(task === null ? "No current task" : `Current task, ${task.title}`);
+    if (task === null) {
+      parts.push("No open tasks");
+    } else {
+      parts.push(
+        `${task.pinned ? "Current task" : "Next task"}, ${task.title}`,
+      );
+    }
   }
   if (github !== undefined) {
     const summary = github?.summary;

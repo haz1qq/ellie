@@ -32,6 +32,8 @@ export interface Settings {
   miniBarY: number | null;
   miniBarShowGitHub: boolean;
   miniBarShowTask: boolean;
+  miniBarWidth: number | null;
+  miniBarHeight: number | null;
 }
 export interface Bootstrap {
   settings: Settings;
@@ -51,6 +53,8 @@ export interface MiniTaskProjection {
   taskId: number;
   title: string;
   kind: TaskKind;
+  /** True when this is the pinned task; false for the next-task fallback. */
+  pinned: boolean;
 }
 
 /** Matches the Rust GitHubConnectionState verbatim serialization. */

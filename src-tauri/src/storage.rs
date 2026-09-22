@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::{error::AppError, settings::Settings};
 
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 /// One migration per entry, in order. Index 0 is migration 0001.
 const MIGRATIONS: &[&str] = &[
@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0016_workspace_task_kind.sql"),
     include_str!("../migrations/0017_workspace_task_sticky_note.sql"),
     include_str!("../migrations/0018_mini_bar_sections.sql"),
+    include_str!("../migrations/0019_mini_bar_size.sql"),
 ];
 
 pub(crate) fn connect(path: &Path) -> Result<Connection, AppError> {
@@ -139,7 +140,7 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
         "SELECT close_to_tray, show_mascot, friendly_messages, notifications_enabled,
                 notification_thresholds, hidden_provider_ids, mini_bar_enabled,
                 mini_bar_opacity, mini_bar_x, mini_bar_y, mini_bar_show_github,
-                mini_bar_show_task
+                mini_bar_show_task, mini_bar_width, mini_bar_height
          FROM application_settings WHERE id = 1",
         [],
         |row| {
@@ -157,6 +158,8 @@ fn read_settings_from(connection: &Connection) -> Result<Settings, AppError> {
                     mini_bar_y: row.get(9)?,
                     mini_bar_show_github: row.get(10)?,
                     mini_bar_show_task: row.get(11)?,
+                    mini_bar_width: row.get(12)?,
+                    mini_bar_height: row.get(13)?,
                 },
                 row.get(4)?,
                 row.get(5)?,
@@ -186,6 +189,7 @@ fn save_settings_to(connection: &Connection, settings: &Settings) -> Result<(), 
          notifications_enabled = ?4, notification_thresholds = ?5, hidden_provider_ids = ?6,
          mini_bar_enabled = ?7, mini_bar_opacity = ?8, mini_bar_x = ?9, mini_bar_y = ?10,
          mini_bar_show_github = ?11, mini_bar_show_task = ?12,
+         mini_bar_width = ?13, mini_bar_height = ?14,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
         params![
             settings.close_to_tray,
@@ -200,6 +204,8 @@ fn save_settings_to(connection: &Connection, settings: &Settings) -> Result<(), 
             settings.mini_bar_y,
             settings.mini_bar_show_github,
             settings.mini_bar_show_task,
+            settings.mini_bar_width,
+            settings.mini_bar_height,
         ],
     )?;
     if changed != 1 {
@@ -222,9 +228,27 @@ pub fn save_settings_preserving_position(
     let mut merged = requested.clone();
     merged.mini_bar_x = current.mini_bar_x;
     merged.mini_bar_y = current.mini_bar_y;
+    // Window size is Rust-owned (written on resize), like the position.
+    merged.mini_bar_width = current.mini_bar_width;
+    merged.mini_bar_height = current.mini_bar_height;
     save_settings_to(&transaction, &merged)?;
     transaction.commit()?;
     Ok(merged)
+}
+
+/// Saves a user-chosen mini bar size. Both values are set together so a size
+/// can never be half-persisted.
+pub fn save_mini_bar_size(path: &Path, width: u32, height: u32) -> Result<(), AppError> {
+    let connection = connect(path)?;
+    let changed = connection.execute(
+        "UPDATE application_settings SET mini_bar_width = ?1, mini_bar_height = ?2,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 1",
+        params![width, height],
+    )?;
+    if changed != 1 {
+        return Err(AppError::Storage);
+    }
+    Ok(())
 }
 
 pub fn save_mini_bar_position(path: &Path, x: i32, y: i32) -> Result<(), AppError> {
@@ -312,6 +336,8 @@ mod tests {
             mini_bar_y: Some(-40),
             mini_bar_show_github: true,
             mini_bar_show_task: true,
+            mini_bar_width: Some(520),
+            mini_bar_height: Some(240),
         };
         save_settings(&path, &changed)?;
         assert_eq!(initialize(&path)?, changed);

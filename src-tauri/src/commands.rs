@@ -28,6 +28,7 @@ pub struct AppState {
     pub settings_view: AtomicBool,
     pub settings_write: tokio::sync::Mutex<()>,
     pub mini_move_generation: AtomicU64,
+    pub mini_resize_generation: AtomicU64,
     pub task_note_move_generation: AtomicU64,
     pub provider_registry: ProviderRegistry,
     pub refresh: RefreshCoordinator,
@@ -58,6 +59,8 @@ pub struct MiniTaskProjection {
     pub task_id: i64,
     pub title: String,
     pub kind: crate::tasks::TaskKind,
+    /// True when this is the pinned task; false when it is a next-task fallback.
+    pub pinned: bool,
 }
 
 #[derive(Serialize)]
@@ -103,15 +106,16 @@ pub async fn get_mini_bootstrap(state: State<'_, AppState>) -> Result<MiniBootst
     // Disabled HUD sections never receive their payloads.
     let task = if settings.mini_bar_show_task {
         let tasks = Arc::clone(&state.tasks);
-        tauri::async_runtime::spawn_blocking(move || tasks.pinned_task())
+        tauri::async_runtime::spawn_blocking(move || tasks.hud_task())
             .await
             .ok()
             .and_then(Result::ok)
             .flatten()
-            .map(|task| MiniTaskProjection {
-                task_id: task.id,
-                title: task.title,
-                kind: task.kind,
+            .map(|hud| MiniTaskProjection {
+                task_id: hud.task.id,
+                title: hud.task.title,
+                kind: hud.task.kind,
+                pinned: hud.pinned,
             })
     } else {
         None

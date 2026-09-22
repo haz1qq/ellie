@@ -68,6 +68,8 @@ const initial = {
   miniBarY: null as number | null,
   miniBarShowGitHub: false,
   miniBarShowTask: false,
+  miniBarWidth: null as number | null,
+  miniBarHeight: null as number | null,
 };
 
 const initialAnalytics = {

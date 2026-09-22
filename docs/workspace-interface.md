@@ -118,7 +118,7 @@ While submitted, disable duplicate creation. A timeout yields **Creation outcome
 
 ## Expanded HUD
 
-Preserve the existing mini window identity and quota-only mode. Optional GitHub and current-task sections are implemented and default OFF on upgrade; enabling either resizes the mini window through bounded band heights (96 px quota band, 52 px task band, 76 px GitHub band) clamped to the monitor work area. W6 does not add a second command-center panel; the separately owner-authorized `task-note` window is a bounded sticky note for one pinned local task, not the expanded HUD.
+Preserve the existing mini window identity and quota-only mode. Optional GitHub and current-task sections are implemented and default OFF on upgrade. The window is user-resizable (`resizable: true`, native minimum 320×96) and its size persists across restarts; Rust sizes it from the enabled bands (96 px quota, 52 px task, 76 px GitHub) plus the 6 px transparent webview padding, never smaller than the enabled bands, and clamps it to the monitor work area. The quota band absorbs extra height so section text never clips. W6 does not add a second command-center panel; the separately owner-authorized `task-note` window is a bounded sticky note for one pinned local task, not the expanded HUD.
 
 ```text
 ┌────────────────────────────────────────────────────────────────┐
@@ -134,7 +134,7 @@ Use independently focusable, sibling section buttons to open AI Usage, GitHub, o
 
 Protect full quota labels and remaining values; only task titles may truncate, with accessible full text. Do not use a rotating ticker or horizontal scrolling as the normal way to read essential information. Bound the displayed selection to what fits; show an explicit “Open Ellie for more” affordance rather than silently hiding content. Exact size/row bounds are W6 validation decisions.
 
-Show scope/coverage/freshness alongside commit counts, not solely in a tooltip. For no pin, say “No current task”; disconnected GitHub remains distinct from zero commits. Use a sufficiently opaque backdrop for text readability at every allowed opacity. Exact contrast must be tested on composite surfaces; palette contrast alone does not prove HUD accessibility.
+Show scope/coverage/freshness alongside commit counts, not solely in a tooltip. The task band shows the pinned task as “Current task”; when nothing is pinned it falls back to the next open task (soonest due date, the same order as the To-do board) labelled “Next task”, and says “No open tasks” only when the board is empty — it never shows a completed task. Disconnected GitHub remains distinct from zero commits. Use a sufficiently opaque backdrop for text readability at every allowed opacity. Exact contrast must be tested on composite surfaces; palette contrast alone does not prove HUD accessibility.
 
 Settings provides HUD hide/show, quota-only mode, section selection, opacity, and a reset-position action for recovery without precise dragging. Warn that task/repository content may appear in screen sharing; no capture-exclusion guarantee.
 
@@ -175,7 +175,7 @@ Checks actually run by the parent for W5b: `npm run typecheck`, `npm run lint`, 
 
 ## Acceptance checklist for later implementation
 
-- Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states. The HUD quota band keeps its existing states; the GitHub band distinguishes disconnected/authorizing/loaded-but-stale/unloaded; the task band distinguishes pinned/no-pin.
+- Every page and HUD section has loading, empty, unavailable, and applicable stale/partial states. The HUD quota band keeps its existing states; the GitHub band distinguishes disconnected/authorizing/loaded-but-stale/unloaded; the task band distinguishes pinned/next-fallback/no-open-tasks and never shows a completed task.
 - Existing quota values, hidden providers, analytics, refresh, settings, and credential flows regress neither visually nor semantically.
 - Narrow layouts and native DPI/monitor changes preserve labels and controls. HUD sizing is Rust-computed per enabled section and clamped to the monitor work area; a native DPI/interaction pass remains to be recorded.
 - Keyboard users can reach pages, editors, confirmations, HUD sections, and reset-position controls.
@@ -187,8 +187,8 @@ The implemented sections above record automated checks actually run. Contrast me
 
 ## W6 implementation status (implemented on `feat/workspace-github`, merged to `main`)
 
-Implemented and verified against the expanded-HUD contract: Settings adds `miniBarShowTask` and `miniBarShowGitHub` opt-ins (default OFF, migration 0018); `get_mini_bootstrap` returns gated `task` and `github` projections; the GitHub projection is a shared in-memory cache updated only by main-window commit reads (never polls); `open_main_section` navigates the main window through a bounded six-view set; the mini window sizes itself from enabled sections (96 px quota band, +52 px task band, +76 px GitHub band) clamped to the monitor work area and emits `mini-refresh` when shown; task changes re-bootstrap the HUD through the existing `tasks-updated` event. The frontend renders sibling focusable section buttons that open To-do/GitHub, with explicit stale/loaded scope copy and a no-pinned-task state.
+Implemented and verified against the expanded-HUD contract: Settings adds `miniBarShowTask` and `miniBarShowGitHub` opt-ins (default OFF, migration 0018) plus a persisted user size (`miniBarWidth`/`miniBarHeight`, migration 0019); `get_mini_bootstrap` returns gated `task` and `github` projections; the task projection is the pinned open task or the next open task with a `pinned` flag; the GitHub projection is a shared in-memory cache updated only by main-window commit reads (never polls); `open_main_section` navigates the main window through a bounded six-view set; the mini window is user-resizable and Rust persists the chosen size on resize, derives its default from the enabled bands plus the webview padding, clamps to the monitor work area, and emits `mini-refresh` when shown; task changes re-bootstrap the HUD through the existing `tasks-updated` event. The frontend renders sibling focusable section buttons that open To-do/GitHub, with explicit stale/loaded scope copy, “Next task” fallback copy, and a no-open-tasks state.
 
-Checks run on `main`: `npm run typecheck`, `npm run lint`, `npm test` (132), `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` (155 library tests incl. HUD sizing and shared-cache tests, 32 CLI tests). Native Windows interaction/DPI dragging and clean-quit smoke checks for the expanded HUD remain to be recorded.
+Checks run on `main`: `npm run typecheck`, `npm run lint`, `npm test` (133), `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` (157 library tests incl. HUD sizing, persisted-size, and task-fallback tests, 32 CLI tests). Native Windows interaction/DPI dragging, user-resize, and clean-quit smoke checks for the expanded HUD remain to be recorded.
 
 The implemented sections above record automated checks actually run. Contrast measurements and native Windows interaction/DPI smoke checks remain outstanding for the expanded HUD panels.

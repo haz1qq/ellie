@@ -3537,17 +3537,20 @@ body[data-window="mini"] #root {
   min-height: 0;
 }
 
+/* The quota band absorbs extra height when the user resizes the bar taller;
+   section bands keep their band height so their text never clips. */
 .mini-band-quota {
-  height: 96px;
+  flex: 1 1 auto;
+  min-height: 96px;
 }
 
 .mini-band-task {
-  height: 52px;
+  flex: 0 0 52px;
   border-top: 1px solid var(--border);
 }
 
 .mini-band-github {
-  height: 76px;
+  flex: 0 0 76px;
   border-top: 1px solid var(--border);
 }
 
@@ -3560,6 +3563,7 @@ body[data-window="mini"] #root {
   width: 100%;
   min-width: 0;
   padding: 10px 14px;
+  overflow: hidden;
   border: 0;
   border-radius: 0;
   background: transparent;
