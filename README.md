@@ -2,13 +2,13 @@
 
 One place to see how much AI you have left.
 
-Ellie is a lightweight, local-first Windows tray app with a quiet black-and-white cat personality. **Milestone 0 is complete**, with automated checks passed and Windows smoke checks confirmed by the owner. The shell does not connect to providers or show sample quota values.
+Ellie is a lightweight, local-first Windows tray app with a quiet black-and-white cat personality. It started from a confirmed **milestone 0** shell and now tracks live AI allowance from OpenAI/Codex, OpenAI API, Anthropic/Claude, and DeepSeek through a command-center dashboard, together with GitHub repository tracking/creation and a local task board.
 
 ## Workspace upgrade
 
-The workspace upgrade is being delivered in phases. GitHub App authentication, bounded repository/commit reads, secure credential storage, personal repository creation, local lists/tasks, and the library-backed command-center dashboard are implemented on `feat/workspace-github`. Existing AI monitoring keeps its prior contracts. The expanded optional HUD is not implemented yet.
+The workspace upgrade was delivered in phases: GitHub App authentication, bounded repository/commit reads, secure credential storage, personal repository creation, local lists/tasks, and the library-backed command-center dashboard are implemented and merged to `main` (via PRs #17–#24 from `feat/workspace-github`). Existing AI monitoring keeps its prior contracts. The expanded optional HUD (W6) is not implemented yet.
 
-Start with the [upgrade plan](docs/workspace-upgrade.md), then the [dashboard/HUD design](docs/workspace-interface.md), [backend/security design](docs/workspace-backend.md), and [GitHub authentication design](docs/workspace-github-auth.md). Live GitHub sign-in has succeeded; repository/commit loading, restart restoration, and disconnect cleanup still require recorded live verification.
+Start with the [upgrade plan](docs/workspace-upgrade.md), then the [dashboard/HUD design](docs/workspace-interface.md), [backend/security design](docs/workspace-backend.md), and [GitHub authentication design](docs/workspace-github-auth.md). Live GitHub sign-in, an owner-authorized repository creation, and multi-repository commit loading have succeeded; restart restoration, refresh-token rotation, and disconnect cleanup still require recorded live verification.
 
 ## Development
 

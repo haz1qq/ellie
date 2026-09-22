@@ -2,6 +2,8 @@
 
 Status: complete. NSIS packaging, automated checks, and owner-confirmed Windows installer smoke verification passed.
 
+> This record describes the original **0.1.0** release artifact. Current development is at **0.3.0**; packaging the workspace/GitHub build is deferred until a release is requested.
+
 Ellie is configured to produce a Windows NSIS installer from the existing Tauri application:
 
 ```powershell

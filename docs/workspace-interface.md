@@ -1,6 +1,6 @@
 # Workspace interface design
 
-**Status: implemented for the main window; expanded HUD pending.** This document expands the [workspace upgrade plan](workspace-upgrade.md). GitHub browsing/creation, local lists/tasks, the six-view command-center hierarchy, and the integrated Overview are implemented on `feat/workspace-github`. The expanded HUD remains future work. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
+**Status: implemented for the main window; expanded HUD pending.** This document expands the [workspace upgrade plan](workspace-upgrade.md). GitHub browsing/creation, local lists/tasks, the six-view command-center hierarchy, and the integrated Overview are implemented on `feat/workspace-github` and merged to `main`. The expanded HUD remains future work. It incorporates the frontend specialist's design, with parent synthesis to resolve conflicting HUD proposals.
 
 ## Preserve the existing application
 
@@ -163,13 +163,13 @@ The GitHub page now paginates the bounded loaded commit set with explicit loaded
 
 Frontend checks after the task-board/sticky-note integration: `npm run typecheck`, `npm run lint`, and `npm test` (10 files, 117 tests) passed; the final production build and native Windows sticky-note smoke check remain to be recorded. A safe 1200×900 browser-preview capture was inspected; native Windows interaction/DPI smoke checks and a release install remain to be recorded.
 
-Multi-repository commit-feed verification: `npm run typecheck`, `npm run lint`, `npm test` (11 files, 121 tests), `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` (153 library tests and 32 CLI tests) passed. Live native loading against multiple GitHub repositories still requires owner smoke verification.
+Multi-repository commit-feed verification: `npm run typecheck`, `npm run lint`, `npm test` (11 files, 121 tests), `npm run build`, `cargo fmt --check`, `cargo clippy --all-targets --all-features`, and `cargo test` (153 library tests and 32 CLI tests) passed. Live native loading against multiple GitHub repositories was subsequently used by the owner; restart restoration, refresh-token rotation, and disconnect cleanup still require recorded smoke verification.
 
 ## W5b implementation status (verified on branch `feat/workspace-github`)
 
 Implemented and parent-verified (all work under `src/`): additive typed GitHub bindings in `src/lib/desktop.ts`, a `useGitHubConnection` hook with generation-ordered mutation boundaries and friendly error-category copy, an additive `github` view (`GitHubPanel`) with connection banner, repository list, and commit list (repository picker + optional branch, plain-text subjects, author login or unattributed label, local-time commit dates, explicit loaded-count scope labels and a bounded-not-account-total footnote), a Settings → GitHub section (`GitHubSettings`) for the non-secret Client ID plus a masked, one-way-save App Client Secret, connect with in-progress/cancel, and disconnect with confirmation (`ConfirmDialog`), plus a skip-to-content link and additive token-based styles covering reduced-motion/reduced-transparency/forced-colors. `MiniBar`, `src/lib/miniQuota.ts`, and everything under `src-tauri/` are untouched.
 
-Checks actually run by the parent for W5b: `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` — all passed at that phase. Live browser authorization subsequently succeeded. Repository/commit loading against the owner's account, restart restoration, and disconnect cleanup remain outstanding.
+Checks actually run by the parent for W5b: `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` — all passed at that phase. Live browser authorization and repository/commit loading subsequently succeeded; restart restoration, refresh-token rotation, and disconnect cleanup remain to be recorded.
 
 **Wire contract note:** the Rust `GitHubConnectionState` enum serializes unit variants verbatim (`Disconnected`/`Authorizing`/`Connected`), so the frontend binds those exact strings; the status struct and summary structs use camelCase fields. Any future `rename_all` change on that enum must be coordinated across both sides. After live verification exposed GitHub's required App secret, the status contract gained only `clientSecretConfigured: boolean`; the secret itself is accepted only by the main-window save command, immediately cleared from the masked field, and never returned.
 

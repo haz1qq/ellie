@@ -1,6 +1,6 @@
 # Milestone 0 verification
 
-Status: milestone 0 complete. Automated checks passed, and the owner confirmed all items in the Windows smoke checklist passed. Milestone 1 has not started.
+Status: milestone 0 complete. Automated checks passed, and the owner confirmed all items in the Windows smoke checklist passed. Subsequent milestones were delivered on their own branches; see `milestone-1.md` … `milestone-10.md`.
 
 ## Automated checks
 

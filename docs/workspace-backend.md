@@ -1,6 +1,6 @@
 # Workspace backend design
 
-**Status: implemented through W4; expanded HUD backend pending.** Companion to the [workspace upgrade plan](workspace-upgrade.md) and [interface design](workspace-interface.md). The GitHub authentication/read service, personal repository prepare/confirm flow, and local task persistence are implemented on `feat/workspace-github`; live remote-creation verification remains outstanding.
+**Status: implemented through W4; expanded HUD backend pending.** Companion to the [workspace upgrade plan](workspace-upgrade.md) and [interface design](workspace-interface.md). The GitHub authentication/read service, personal repository prepare/confirm flow, and local task persistence are implemented on `feat/workspace-github` and merged to `main`; live repository creation was verified by the owner.
 
 ## Existing boundaries and planned extension
 
@@ -135,7 +135,7 @@ Tests use sanitized fixtures and local `127.0.0.1` mock servers only; only produ
 4. `github_connect_start` leaves the service in `Authorizing` until completion or an explicit `github_disconnect`; there is no expiry timer for an abandoned authorization.
 5. Token parsing initially required exact expiry values and fixed token prefixes. Live verification exposed a generic `MalformedResponse`; the parser now treats tokens as opaque bounded values, accepts positive bounded provider-reported lifetimes, still requires refresh-token fields, and returns redacted stage-specific categories for missing expiration fields, unsupported token metadata, or an unusable account response.
 6. No GitHub events are emitted and no UI consumes these commands yet (W5 wiring).
-7. Live verification remains outstanding: real GitHub App consent, real Windows Credential Manager writes, and refresh-token rotation behavior.
+7. Live verification: real GitHub App consent and real Windows Credential Manager writes have since succeeded (owners performed live sign-in and repository creation); refresh-token rotation behavior remains to be observed.
 
 Nothing in this section is a claim about live GitHub behavior.
 
@@ -156,7 +156,7 @@ Checks actually run by the parent and their results:
 
 A scan confirmed the owner's real Client ID appears nowhere in the repository; only sanitized values such as `Iv1.sanitized-client` are used. The real Client ID lives only in the user's runtime settings via `github_save_client_id`.
 
-**Remaining gaps (recorded, not yet implemented):** repository selection/cache persistence and commit coverage tables from the design are not yet built (commits are fetched on demand); no GitHub events exist; no UI consumes these commands (W5); live GitHub App authorization, real Windows Credential Manager writes, and refresh-token rotation are still unverified; and a connection-persistence failure keeps the in-memory session and refresh token while reporting `Disconnected` so the next `connect_complete` retry can succeed (tested).
+**Remaining gaps (recorded, not yet implemented):** repository selection/cache persistence and commit coverage tables from the design are not yet built (commits are fetched on demand); no GitHub events exist; live GitHub App authorization and real Windows Credential Manager writes have now succeeded, while refresh-token rotation and restart restoration remain unverified; and a connection-persistence failure keeps the in-memory session and refresh token while reporting `Disconnected` so the next `connect_complete` retry can succeed (tested).
 
 ## W5a implementation status (verified on branch `feat/workspace-github`)
 
@@ -174,7 +174,7 @@ Parent verification passed: `cargo fmt --check`; `cargo clippy --all-targets --a
 
 Live verification subsequently reached token/account response validation but surfaced only the generic `malformed_response` category. The parser now returns `token_expiration_required`, `token_response_invalid`, or `account_response_invalid` without logging bodies, tokens, or field values. Token strings are treated as opaque bounded credentials rather than relying on provider prefixes; provider-reported expirations are accepted only when positive and within bounded access/refresh limits. A fresh sign-in will therefore either complete if the issue was harmless prefix/lifetime drift or identify the failing stage safely. Parent verification passed: `cargo fmt --check`; `cargo clippy --all-targets --all-features -- -D warnings`; `cargo test` (124 library + 32 CLI tests); `npm run typecheck`; `npm run lint`; `npm test` (7 files, 106 tests); and `npm run build`.
 
-Repository/commit loading, restart restore, refresh-token rotation, and disconnect remain live-verification items until sign-in succeeds.
+Live sign-in and repository/commit loading have succeeded; restart restore, refresh-token rotation, and disconnect remain recorded-live-verification items.
 
 ## W3/W4 implementation status (branch `feat/workspace-github`)
 
@@ -194,4 +194,4 @@ Tests should exercise hostile text/URLs, wrong-account results, branch deduplica
 
 Remaining decisions are limited to repository-selection/cache persistence, final expanded-HUD sizing/content controls, and any future organization-creation policy. Personal-only creation, bounded input rules, and case-insensitive unique list names are implemented.
 
-Automated frontend and Rust checks were run as recorded above. No live repository creation, installer smoke check, or native Windows DPI/interaction pass was performed.
+Automated frontend and Rust checks were run as recorded above. A live repository creation was performed at the owner's request during development; the installer smoke check and a native Windows DPI/interaction pass for the workspace build remain deferred.
