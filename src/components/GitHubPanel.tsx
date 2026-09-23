@@ -41,6 +41,14 @@ const COMMITS_PER_PAGE = 10;
 /** Repository list pagination on the GitHub page. */
 const REPOSITORIES_PER_PAGE = 12;
 
+type RepoVisibilityFilter = "all" | "public" | "private";
+
+const REPO_VISIBILITY_OPTIONS: Array<{ value: RepoVisibilityFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "public", label: "Public" },
+  { value: "private", label: "Private" },
+];
+
 const BRANCH_OPTIONS = [
   { value: "default", label: "Default branch" },
   { value: "main", label: "main" },
@@ -69,6 +77,7 @@ export function GitHubPanel({
   const [commitsError, setCommitsError] = useState("");
   const [commitPage, setCommitPage] = useState(1);
   const [repoQuery, setRepoQuery] = useState("");
+  const [repoVisibility, setRepoVisibility] = useState<RepoVisibilityFilter>("all");
   const [repoPage, setRepoPage] = useState(1);
   const [creationOpen, setCreationOpen] = useState(false);
 
@@ -161,14 +170,17 @@ export function GitHubPanel({
 
   const filteredRepositories = useMemo(() => {
     const query = repoQuery.trim().toLowerCase();
-    if (!query) return repositories;
-    return repositories.filter(
-      (repo) =>
+    return repositories.filter((repo) => {
+      if (repoVisibility === "public" && repo.private) return false;
+      if (repoVisibility === "private" && !repo.private) return false;
+      if (!query) return true;
+      return (
         repo.fullName.toLowerCase().includes(query) ||
-        repo.name.toLowerCase().includes(query),
-    );
-  }, [repositories, repoQuery]);
-  const isFiltering = repoQuery.trim().length > 0;
+        repo.name.toLowerCase().includes(query)
+      );
+    });
+  }, [repositories, repoQuery, repoVisibility]);
+  const isFiltering = repoQuery.trim().length > 0 || repoVisibility !== "all";
   const repoPageCount = Math.max(
     1,
     Math.ceil(filteredRepositories.length / REPOSITORIES_PER_PAGE),
@@ -317,6 +329,26 @@ export function GitHubPanel({
                   setRepoPage(1);
                 }}
               />
+              <div
+                className="segmented"
+                role="group"
+                aria-label="Filter repositories by visibility"
+              >
+                {REPO_VISIBILITY_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={repoVisibility === option.value ? "segmented-active" : ""}
+                    aria-pressed={repoVisibility === option.value}
+                    onClick={() => {
+                      setRepoVisibility(option.value);
+                      setRepoPage(1);
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {!native ? (
@@ -348,11 +380,23 @@ export function GitHubPanel({
           ) : filteredRepositories.length === 0 ? (
             <EmptyState title="No repositories match">
               <p className="empty-state-text">
-                No repositories match “{repoQuery.trim()}”. Try a different
-                name or clear the search.
+                {repoQuery.trim()
+                  ? `No repositories match “${repoQuery.trim()}”${
+                      repoVisibility === "all" ? "" : ` among ${repoVisibility} repositories`
+                    }. Try a different name or clear the filters.`
+                  : `No ${repoVisibility} repositories are loaded.`}
               </p>
-              <Button size="sm" variant="ghost" onClick={() => setRepoQuery("")} className="empty-state-action">
-                Clear search
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRepoQuery("");
+                  setRepoVisibility("all");
+                  setRepoPage(1);
+                }}
+                className="empty-state-action"
+              >
+                Clear filters
               </Button>
             </EmptyState>
           ) : (

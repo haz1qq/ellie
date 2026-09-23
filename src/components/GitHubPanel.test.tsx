@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubPanel } from "./GitHubPanel";
@@ -246,7 +246,7 @@ describe("GitHubPanel", () => {
     expect(screen.getByText("1 of 3")).toBeVisible();
   });
 
-  it("offers a clear-search action when no repository matches", async () => {
+  it("offers a clear-filter action when no repository matches", async () => {
     vi.mocked(desktop.githubListRepositories).mockResolvedValue([
       { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
     ]);
@@ -257,7 +257,66 @@ describe("GitHubPanel", () => {
     const user = userEvent.setup();
     await user.type(screen.getByRole("searchbox", { name: "Search repositories" }), "missing-repo");
     expect(await screen.findByText("No repositories match")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByText("octocat/ellie")).toBeVisible();
+  });
+
+  it("filters repositories by public or private visibility", async () => {
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue([
+      { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
+      { id: 2, name: "notes", fullName: "octocat/notes", private: false, defaultBranch: "main", htmlUrl: "https://github.com/octocat/notes" },
+      { id: 3, name: "dashboard", fullName: "octocat/dashboard", private: false, defaultBranch: "main", htmlUrl: "https://github.com/octocat/dashboard" },
+    ]);
+
+    renderPanel({}, connectedStatus);
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(screen.getByText("octocat/notes")).toBeVisible();
+    expect(screen.getByText("3 loaded")).toBeVisible();
+
+    const user = userEvent.setup();
+    const visibility = screen.getByRole("group", {
+      name: "Filter repositories by visibility",
+    });
+
+    // Private only hides every public repository and reports the scope.
+    await user.click(within(visibility).getByRole("button", { name: "Private" }));
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(screen.queryByText("octocat/notes")).not.toBeInTheDocument();
+    expect(screen.queryByText("octocat/dashboard")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3")).toBeVisible();
+
+    // Public only shows just the public repositories.
+    await user.click(within(visibility).getByRole("button", { name: "Public" }));
+    expect(await screen.findByText("octocat/notes")).toBeVisible();
+    expect(screen.getByText("octocat/dashboard")).toBeVisible();
+    expect(screen.queryByText("octocat/ellie")).not.toBeInTheDocument();
+    expect(screen.getByText("2 of 3")).toBeVisible();
+
+    // All restores the full loaded list.
+    await user.click(within(visibility).getByRole("button", { name: "All" }));
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(screen.getByText("3 loaded")).toBeVisible();
+  });
+
+  it("combines the visibility filter with the name search", async () => {
+    vi.mocked(desktop.githubListRepositories).mockResolvedValue([
+      { id: 1, name: "ellie", fullName: "octocat/ellie", private: true, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie" },
+      { id: 2, name: "ellie-docs", fullName: "octocat/ellie-docs", private: false, defaultBranch: "main", htmlUrl: "https://github.com/octocat/ellie-docs" },
+    ]);
+
+    renderPanel({}, connectedStatus);
+    expect(await screen.findByText("octocat/ellie-docs")).toBeVisible();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("searchbox", { name: "Search repositories" }), "ellie");
+    await user.click(
+      within(
+        screen.getByRole("group", { name: "Filter repositories by visibility" }),
+      ).getByRole("button", { name: "Private" }),
+    );
+
+    expect(await screen.findByText("octocat/ellie")).toBeVisible();
+    expect(screen.queryByText("octocat/ellie-docs")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeVisible();
   });
 });
